@@ -30,7 +30,8 @@ import {
   Database,
   X,
   Trash2,
-  CloudUpload
+  CloudUpload,
+  Download
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { cacheManager } from '../../lib/cacheManager'
@@ -338,6 +339,14 @@ export default function Dashboard() {
       gradient: 'from-cyan-500 to-blue-600',
       route: '/marketing',
       permissionKey: 'MARKETING'
+    },
+    {
+      id: 'ledger',
+      title: 'Ledger',
+      icon: Download,
+      gradient: 'from-teal-500 to-green-600',
+      route: '/ledger',
+      permissionKey: 'REPORTS'
     }
   ]
 
