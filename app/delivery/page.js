@@ -1,0 +1,2103 @@
+'use client'
+
+import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import { cacheManager } from '../../lib/cacheManager'
+import { themeManager } from '../../lib/themeManager'
+import { authManager } from '../../lib/authManager'
+import loyaltyManager from '../../lib/loyaltyManager'
+import { webOrderNotificationManager } from '../../lib/webOrderNotification'
+import { notify } from '../../components/ui/NotificationSystem'
+import Modal from '../../components/ui/Modal'
+import { printerManager } from '../../lib/printerManager'
+import DeliveryCustomerForm from '../../components/pos/DeliveryCustomerForm'
+import CategorySidebar from '../../components/test/CategorySidebar'
+import ProductGrid from '../../components/test/ProductGrid'
+import VariantSelectionScreen from '../../components/test/VariantSelectionScreen'
+import DealFlavorSelectionScreen from '../../components/test/DealFlavorSelectionScreen'
+import CartSidebar from '../../components/test/CartSidebar'
+import WalkinOrdersSidebar from '../../components/test/WalkinOrdersSidebar'
+import WalkinOrderDetails from '../../components/test/WalkinOrderDetails'
+import { FileText, Check, Printer } from 'lucide-react'
+import toast, { Toaster } from 'react-hot-toast'
+import { supabase } from '../../lib/supabase'
+import { motion, AnimatePresence } from 'framer-motion'
+import ProtectedPage from '../../components/ProtectedPage'
+
+export default function DeliveryPage() {
+  const router = useRouter()
+  const productGridRef = useRef(null)
+
+  const [user, setUser] = useState(null)
+  const [userRole, setUserRole] = useState(null)
+  const [cashierData, setCashierData] = useState(null)
+  const [sessionId, setSessionId] = useState(null)
+  const [categories, setCategories] = useState([])
+  const [allProducts, setAllProducts] = useState([])
+  const [deals, setDeals] = useState([])
+  const [orderTypes, setOrderTypes] = useState([])
+  const [cart, setCart] = useState([])
+  const [customer, setCustomer] = useState(null)
+  const [orderInstructions, setOrderInstructions] = useState('')
+  const [deliveryTime, setDeliveryTime] = useState('')
+  const [deliveryCharges, setDeliveryCharges] = useState(0)
+  const [networkStatus, setNetworkStatus] = useState({ isOnline: true, unsyncedOrders: 0 })
+  const [isDataReady, setIsDataReady] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [theme, setTheme] = useState('light')
+  const [isReopenedOrder, setIsReopenedOrder] = useState(false)
+  const [originalOrderId, setOriginalOrderId] = useState(null)
+
+  // View state management
+  const [currentView, setCurrentView] = useState('products')
+  const [selectedProduct, setSelectedProduct] = useState(null)
+  const [selectedDeal, setSelectedDeal] = useState(null)
+  const [productVariants, setProductVariants] = useState([])
+  const [dealProducts, setDealProducts] = useState([])
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null)
+
+  // Orders view
+  const [showOrdersView, setShowOrdersView] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState(null)
+  const [ordersRefreshTrigger, setOrdersRefreshTrigger] = useState(0)
+
+  // Modals
+  const [showCustomerForm, setShowCustomerForm] = useState(false)
+  const [showExitModal, setShowExitModal] = useState(false)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [completedOrderData, setCompletedOrderData] = useState(null)
+  const [isPrinting, setIsPrinting] = useState(false)
+
+  // Save cart to localStorage
+  useEffect(() => {
+    if (cart.length > 0) {
+      localStorage.setItem('delivery_cart', JSON.stringify(cart))
+      localStorage.setItem('delivery_customer', JSON.stringify(customer))
+      localStorage.setItem('delivery_instructions', orderInstructions)
+      localStorage.setItem('delivery_time', deliveryTime)
+      localStorage.setItem('delivery_charges', deliveryCharges)
+      localStorage.setItem('delivery_reopened', JSON.stringify(isReopenedOrder))
+      localStorage.setItem('delivery_original_order', originalOrderId)
+    }
+  }, [cart, customer, orderInstructions, deliveryTime, deliveryCharges, isReopenedOrder, originalOrderId])
+
+  // Listen for reloadCart event (when reopening from same page)
+  useEffect(() => {
+    const handleReloadCart = (event) => {
+      console.log('🔄 [Delivery] reloadCart event received, reloading cart from localStorage')
+
+      const savedCart = localStorage.getItem('delivery_cart')
+      const savedCustomer = localStorage.getItem('delivery_customer')
+      const savedInstructions = localStorage.getItem('delivery_instructions')
+      const savedDeliveryTime = localStorage.getItem('delivery_time')
+      const savedDeliveryCharges = localStorage.getItem('delivery_charges')
+      const savedModifyingOrderId = localStorage.getItem('delivery_modifying_order')
+
+      if (savedCart) {
+        const parsedCart = JSON.parse(savedCart)
+        console.log('🛒 [Delivery] Reloading cart from localStorage:', parsedCart)
+        setCart(parsedCart)
+      }
+      if (savedCustomer) setCustomer(JSON.parse(savedCustomer))
+      if (savedInstructions) setOrderInstructions(savedInstructions)
+      if (savedDeliveryTime) setDeliveryTime(savedDeliveryTime)
+      if (savedDeliveryCharges) setDeliveryCharges(savedDeliveryCharges)
+      if (savedModifyingOrderId) {
+        setIsReopenedOrder(true)
+        setOriginalOrderId(savedModifyingOrderId)
+      }
+    }
+
+    window.addEventListener('reloadCart', handleReloadCart)
+    return () => window.removeEventListener('reloadCart', handleReloadCart)
+  }, [])
+
+  // Load cached data on mount
+  useEffect(() => {
+    if (!authManager.isLoggedIn()) {
+      router.push('/')
+      return
+    }
+
+    const userData = authManager.getCurrentUser()
+    const role = authManager.getRole()
+    const cashier = authManager.getCashier()
+    const session = authManager.getCurrentSession()
+
+    setUser(userData)
+    setUserRole(role)
+    setCashierData(cashier)
+    setSessionId(session?.id)
+
+    console.log('👤 Delivery page loaded by:', role, '-', authManager.getDisplayName())
+
+    if (userData?.id) {
+      cacheManager.setUserId(userData.id)
+      // Initialize loyalty manager
+      loyaltyManager.initialize(userData.id).catch(err => {
+        console.error('Failed to initialize loyalty manager:', err)
+      })
+
+      // Set up web order notifications
+      webOrderNotificationManager.setUserId(userData.id)
+      webOrderNotificationManager.startListening(null, {
+        action: {
+          label: 'View Web Orders',
+          onClick: () => router.push('/web-orders')
+        }
+      })
+    }
+
+    setTheme(themeManager.currentTheme)
+    themeManager.applyTheme()
+
+    // Function to load order data from localStorage
+    const loadOrderDataFromStorage = () => {
+      const savedCart = localStorage.getItem('delivery_cart')
+      const savedCustomer = localStorage.getItem('delivery_customer')
+      const savedInstructions = localStorage.getItem('delivery_instructions')
+      const savedDeliveryTime = localStorage.getItem('delivery_time')
+      const savedDeliveryCharges = localStorage.getItem('delivery_charges')
+      const savedModifyingOrderId = localStorage.getItem('delivery_modifying_order')
+      const savedOriginalOrderNumber = localStorage.getItem('delivery_modifying_order_number')
+
+      console.log('🔄 [Delivery] Loading order data from localStorage:', {
+        hasCart: !!savedCart,
+        cartItemsCount: savedCart ? JSON.parse(savedCart).length : 0,
+        hasModifyingOrder: !!savedModifyingOrderId,
+        modifyingOrderId: savedModifyingOrderId,
+        orderNumber: savedOriginalOrderNumber,
+        deliveryCharges: savedDeliveryCharges
+      })
+
+      if (savedCart) {
+        const parsedCart = JSON.parse(savedCart)
+        console.log('📦 [Delivery] Loading cart from localStorage:', parsedCart)
+        setCart(parsedCart)
+      }
+      if (savedCustomer) setCustomer(JSON.parse(savedCustomer))
+      if (savedInstructions) setOrderInstructions(savedInstructions)
+      if (savedDeliveryTime) setDeliveryTime(savedDeliveryTime)
+      if (savedDeliveryCharges) setDeliveryCharges(parseFloat(savedDeliveryCharges))
+      if (savedModifyingOrderId) {
+        console.log('🔄 [Delivery] Setting as reopened order:', savedModifyingOrderId)
+        setIsReopenedOrder(true)
+        setOriginalOrderId(savedModifyingOrderId)
+      }
+    }
+
+    // Load order data from localStorage
+    loadOrderDataFromStorage()
+
+    checkAndLoadData()
+
+    const statusInterval = setInterval(() => {
+      setNetworkStatus(cacheManager.getNetworkStatus())
+    }, 1000)
+
+    // Add window focus listener to reload data when page becomes visible
+    const handleFocus = () => {
+      console.log('🔄 [Delivery] Window focused, checking for updated order data')
+      loadOrderDataFromStorage()
+    }
+
+    // Add custom event listener for order reopening
+    const handleOrderReopened = (event) => {
+      console.log('🔄 [Delivery] Order reopened event received:', event.detail)
+      if (event.detail?.orderType === 'delivery') {
+        // Small delay to ensure localStorage is fully written
+        setTimeout(() => {
+          loadOrderDataFromStorage()
+        }, 100)
+      }
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('orderReopened', handleOrderReopened)
+
+    return () => {
+      clearInterval(statusInterval)
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('orderReopened', handleOrderReopened)
+    }
+  }, []) // Empty array ensures this runs on every mount
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(newTheme)
+    themeManager.setTheme(newTheme)
+  }
+
+  const checkAndLoadData = async () => {
+    try {
+      if (cacheManager.isReady()) {
+        console.log('📦 Cache is ready, loading data immediately')
+        loadCachedData()
+        setIsDataReady(true)
+        setIsLoading(false)
+        return
+      }
+
+      console.log('⏳ Cache not ready, waiting for initialization...')
+      // Keep loading state true only if cache is not ready
+
+      let attempts = 0
+      const maxAttempts = 30
+
+      const checkInterval = setInterval(() => {
+        attempts++
+
+        if (cacheManager.isReady()) {
+          console.log('✅ Cache became ready, loading data')
+          clearInterval(checkInterval)
+          loadCachedData()
+          setIsDataReady(true)
+          setIsLoading(false)
+        } else if (attempts >= maxAttempts) {
+          console.log('⚠️ Cache timeout, trying to initialize manually')
+          clearInterval(checkInterval)
+
+          cacheManager.initializeCache().then(() => {
+            if (cacheManager.isReady()) {
+              loadCachedData()
+              setIsDataReady(true)
+            } else {
+              console.log('❌ Failed to load cache, redirecting to dashboard')
+              notify.error('Failed to load menu data. Please try again from the dashboard.', {
+                duration: 6000,
+                action: {
+                  label: 'Go to Dashboard',
+                  onClick: () => router.push('/dashboard')
+                }
+              })
+            }
+            setIsLoading(false)
+          }).catch((error) => {
+            console.error('Cache initialization error:', error)
+            notify.error('Failed to load menu data. Please check your connection.', {
+              duration: 6000,
+              action: {
+                label: 'Retry',
+                onClick: () => window.location.reload()
+              }
+            })
+            setIsLoading(false)
+          })
+        }
+      }, 100) // Reduced from 500ms to 100ms for faster checks
+
+    } catch (error) {
+      console.error('Error checking cache:', error)
+      setIsLoading(false)
+      notify.error('Error loading menu data. Please try again.', {
+        action: {
+          label: 'Go to Dashboard',
+          onClick: () => router.push('/dashboard')
+        }
+      })
+    }
+  }
+
+  const loadCachedData = async () => {
+    const cachedCategories = cacheManager.getCategories()
+    const cachedProducts = cacheManager.getProducts()
+    const cachedDeals = cacheManager.getDeals()
+
+    setCategories(cachedCategories)
+    setAllProducts(cachedProducts)
+    setDeals(cachedDeals)
+
+    // Fetch order types for order_type_id
+    try {
+      const { data: orderTypesData, error } = await supabase
+        .from('order_types')
+        .select('id, name')
+        .order('name')
+
+      if (!error && orderTypesData) {
+        setOrderTypes(orderTypesData)
+        console.log('📋 Loaded order types:', orderTypesData)
+      }
+    } catch (error) {
+      console.error('Failed to load order types:', error)
+    }
+
+    console.log('📦 Loaded from cache:', {
+      categories: cachedCategories.length,
+      products: cachedProducts.length,
+      deals: cachedDeals.length
+    })
+  }
+
+  const handleProductClick = (product) => {
+    setSelectedProduct(product)
+    const variants = cacheManager.getProductVariants(product.id)
+    setProductVariants(variants)
+
+    if (!variants || variants.length === 0) {
+      const cartItem = {
+        id: `${product.id}-base-${Date.now()}`,
+        productId: product.id,
+        variantId: null,
+        productName: product.name,
+        variantName: null,
+        basePrice: parseFloat(product.base_price),
+        variantPrice: 0,
+        finalPrice: parseFloat(product.base_price),
+        quantity: 1,
+        totalPrice: parseFloat(product.base_price),
+        image: product.image_url
+      }
+      handleAddToCart(cartItem)
+    } else {
+      setCurrentView('variant')
+    }
+  }
+
+  const handleDealClick = (deal) => {
+    if (deal?.scrollToDeals) {
+      if (currentView !== 'products') {
+        setCurrentView('products')
+        setSelectedProduct(null)
+        setSelectedDeal(null)
+        setProductVariants([])
+      }
+
+      setTimeout(() => {
+        if (productGridRef.current) {
+          productGridRef.current.scrollToDeals()
+        }
+      }, 100)
+      return
+    }
+
+    setSelectedDeal(deal)
+    const products = cacheManager.getDealProducts(deal.id)
+    setDealProducts(products)
+    setCurrentView('deal')
+  }
+
+  const handleAddToCart = (cartItem) => {
+    setCart(prevCart => {
+      // Check if the same item already exists in cart
+      const existingItemIndex = prevCart.findIndex(item => {
+        // For deals, check if deal IDs match
+        if (item.isDeal && cartItem.isDeal) {
+          return item.dealId === cartItem.dealId
+        }
+        // For regular products, check if product ID and variant ID match
+        if (!item.isDeal && !cartItem.isDeal) {
+          return item.productId === cartItem.productId &&
+                 item.variantId === cartItem.variantId
+        }
+        return false
+      })
+
+      // If item exists, increment its quantity
+      if (existingItemIndex !== -1) {
+        const updatedCart = [...prevCart]
+        const existingItem = updatedCart[existingItemIndex]
+        const newQuantity = existingItem.quantity + cartItem.quantity
+        updatedCart[existingItemIndex] = {
+          ...existingItem,
+          quantity: newQuantity,
+          totalPrice: existingItem.finalPrice * newQuantity
+        }
+        return updatedCart
+      }
+
+      // If item doesn't exist, add it to cart
+      return [...prevCart, cartItem]
+    })
+    setCurrentView('products')
+    setSelectedProduct(null)
+    setSelectedDeal(null)
+    setProductVariants([])
+    setDealProducts([])
+
+    const itemName = cartItem.isDeal ? cartItem.dealName : cartItem.productName
+    const variantInfo = cartItem.variantName ? ` (${cartItem.variantName})` : ''
+    toast.success(`${itemName}${variantInfo} added to cart!`, {
+      duration: 1000,
+      style: {
+        borderRadius: '10px',
+        background: theme === 'dark' ? '#1f2937' : '#fff',
+        color: theme === 'dark' ? '#f3f4f6' : '#111827',
+        border: theme === 'dark' ? '1px solid #374151' : '1px solid #e5e7eb',
+      },
+    })
+  }
+
+  const updateCartItemQuantity = (itemId, newQuantity) => {
+    if (newQuantity <= 0) {
+      removeCartItem(itemId)
+      return
+    }
+
+    setCart(prevCart => prevCart.map(item =>
+      item.id === itemId
+        ? { ...item, quantity: newQuantity, totalPrice: item.finalPrice * newQuantity }
+        : item
+    ))
+  }
+
+  const removeCartItem = (itemId) => {
+    const item = cart.find(item => item.id === itemId)
+    setCart(prevCart => prevCart.filter(item => item.id !== itemId))
+
+    if (item) {
+      const itemName = item.isDeal ? item.dealName : item.productName
+      toast.info(`${itemName} removed from cart`, { duration: 1000 })
+    }
+  }
+
+  const handleClearCart = () => {
+    setCart([])
+    toast.success('Cart cleared', { duration: 1000 })
+  }
+
+  const calculateSubtotal = () => {
+    return cart.reduce((sum, item) => sum + item.totalPrice, 0)
+  }
+
+  const calculateTotal = () => {
+    return calculateSubtotal() + deliveryCharges
+  }
+
+  const scrollToCategory = (categoryId) => {
+    if (currentView !== 'products') {
+      setCurrentView('products')
+      setSelectedProduct(null)
+      setSelectedDeal(null)
+      setProductVariants([])
+    }
+
+    setTimeout(() => {
+      if (productGridRef.current) {
+        productGridRef.current.scrollToCategory(categoryId)
+      }
+    }, 100)
+  }
+
+  // Orders view handlers
+  const handleOrdersClick = () => {
+    if (showOrdersView) {
+      // Toggle off - return to categories sidebar
+      setShowOrdersView(false)
+      setSelectedOrder(null)
+      // Only go back to products if we were showing order details
+      if (currentView === 'orders') {
+        setCurrentView('products')
+      }
+    } else {
+      // Show orders list in sidebar (keep current view)
+      setShowOrdersView(true)
+      // Don't change currentView here - product menu stays visible
+    }
+  }
+
+  const handleOrderSelect = (order) => {
+    setSelectedOrder(order)
+    // Now show order details in center area
+    setCurrentView('orders')
+    setSelectedProduct(null)
+    setSelectedDeal(null)
+    setProductVariants([])
+    setDealProducts([])
+  }
+
+  const handleCloseOrdersView = () => {
+    setShowOrdersView(false)
+    setSelectedOrder(null)
+    setCurrentView('products')
+  }
+
+  const handleOrderStatusUpdate = async (order, newStatus) => {
+    try {
+      // Use cacheManager for offline-capable status update
+      const result = await cacheManager.updateOrderStatus(order.id, newStatus)
+
+      if (!result.success) {
+        throw new Error('Failed to update order status')
+      }
+
+      // Show appropriate toast based on online/offline status
+      if (result.isOffline) {
+        toast.success(`Order marked as ${newStatus} (will sync when online)`, {
+          duration: 3000,
+          style: {
+            borderRadius: '10px',
+            background: theme === 'dark' ? '#1f2937' : '#fff',
+            color: theme === 'dark' ? '#f3f4f6' : '#111827',
+            border: theme === 'dark' ? '1px solid #f59e0b' : '1px solid #f59e0b',
+          },
+        })
+      } else {
+        toast.success(`Order marked as ${newStatus}!`, {
+          duration: 2000,
+          style: {
+            borderRadius: '10px',
+            background: theme === 'dark' ? '#1f2937' : '#fff',
+            color: theme === 'dark' ? '#f3f4f6' : '#111827',
+            border: theme === 'dark' ? '1px solid #374151' : '1px solid #e5e7eb',
+          },
+        })
+      }
+
+      // If order is completed, close the order details and refresh orders list
+      if (newStatus === 'Completed') {
+        setSelectedOrder(null)
+        setCurrentView('products')
+        // Trigger refresh of orders list to remove completed order
+        setOrdersRefreshTrigger(prev => prev + 1)
+      } else {
+        // Refresh the selected order for other status changes
+        setSelectedOrder({ ...order, order_status: newStatus })
+      }
+    } catch (error) {
+      console.error('Error updating order status:', error)
+      toast.error('Failed to update order status')
+    }
+  }
+
+  // Play beep sound function
+  const playBeepSound = () => {
+    try {
+      const audio = new Audio('/sounds/beep.mp3')
+      audio.play().catch(() => {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+        const oscillator = audioContext.createOscillator()
+        const gainNode = audioContext.createGain()
+
+        oscillator.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+
+        oscillator.frequency.value = 800
+        oscillator.type = 'sine'
+
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
+
+        oscillator.start(audioContext.currentTime)
+        oscillator.stop(audioContext.currentTime + 0.5)
+      })
+    } catch (error) {
+      console.log('Could not play beep sound:', error)
+    }
+  }
+
+  // Handle payment completion from inline payment view
+  const handlePaymentRequired = async (order, paymentData) => {
+    try {
+      // CRITICAL: Handle split payment (paymentData is an array)
+      if (Array.isArray(paymentData)) {
+        console.log('💳 [Delivery] Processing split payment completion:', paymentData)
+
+        // Calculate total from payments
+        const totalPaid = paymentData.reduce((sum, p) => sum + parseFloat(p.amount), 0)
+
+        // Prepare payment transactions
+        const transactions = paymentData.map(payment => ({
+          order_id: order.id,
+          payment_method: payment.method,
+          amount: parseFloat(payment.amount),
+          reference_number: payment.reference || null,
+          notes: payment.notes || null,
+          created_at: new Date().toISOString()
+        }))
+
+        // CRITICAL FIX: Check if online or offline
+        if (navigator.onLine) {
+          console.log('🌐 [Delivery Split Payment] ONLINE - Updating order and inserting transactions to database')
+
+          // Update order with split payment
+          const { error: updateError } = await supabase
+            .from('orders')
+            .update({
+              payment_method: 'Split',
+              payment_status: 'Paid',
+              amount_paid: totalPaid,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', order.id)
+
+          if (updateError) throw updateError
+
+          // Insert payment transactions
+          const { error: txError } = await supabase
+            .from('order_payment_transactions')
+            .insert(transactions)
+
+          if (txError) {
+            console.error('❌ [Delivery] Error inserting payment transactions:', txError)
+            throw txError
+          } else {
+            console.log('✅ [Delivery] Split payment transactions inserted to database:', transactions.length)
+            // Cache the transactions for offline fallback
+            cacheManager.setPaymentTransactions(order.id, transactions)
+          }
+        } else {
+          console.log('📴 [Delivery Split Payment] OFFLINE - Caching order update and transactions')
+
+          // Update order in cache
+          const orderIndex = cacheManager.cache.orders.findIndex(o => o.id === order.id)
+          if (orderIndex !== -1) {
+            cacheManager.cache.orders[orderIndex] = {
+              ...cacheManager.cache.orders[orderIndex],
+              payment_method: 'Split',
+              payment_status: 'Paid',
+              amount_paid: totalPaid,
+              updated_at: new Date().toISOString(),
+              _isSynced: false
+            }
+            await cacheManager.saveCacheToStorage()
+            console.log('✅ [Delivery Split Payment] Order updated in cache (offline)')
+          }
+
+          // Cache the transactions for syncing when online
+          cacheManager.setPaymentTransactions(order.id, transactions)
+          console.log('✅ [Delivery Split Payment] Transactions cached for later sync:', transactions.length)
+        }
+
+        // Log the split payment action
+        await authManager.logOrderAction(
+          order.id,
+          'payment_completed',
+          {
+            payment_method: 'Split',
+            amount: totalPaid,
+            transaction_count: transactions.length
+          },
+          `Split payment completed: Rs ${totalPaid} (${transactions.length} transactions)`
+        )
+
+        // Continue with receipt printing and modal closing
+        // (will be handled by the calling code)
+        return
+      }
+
+      // Regular payment (paymentData is an object)
+      // Update order with payment details
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          payment_method: paymentData.paymentMethod,
+          payment_status: 'Paid',
+          discount_amount: paymentData.discountAmount || 0,
+          discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
+          total_amount: paymentData.newTotal,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', order.id)
+
+      if (updateError) throw updateError
+
+      // Log the payment action
+      await authManager.logOrderAction(
+        order.id,
+        'payment_completed',
+        {
+          payment_method: paymentData.paymentMethod,
+          amount: paymentData.newTotal,
+          discount: paymentData.discountAmount
+        },
+        `Payment completed: ${paymentData.paymentMethod} - Rs ${paymentData.newTotal}`
+      )
+
+      // CRITICAL FIX: Handle customer ledger entry for Account payment
+      if (paymentData.paymentMethod === 'Account' && order.customer_id) {
+        try {
+          console.log('💳 [Delivery Payment] Processing customer ledger for Account payment')
+
+          const currentUser = authManager.getCurrentUser()
+          if (!currentUser?.id) {
+            console.error('⚠️ [Delivery Payment] No current user found, skipping ledger entry')
+          } else {
+            // Import customerLedgerManager
+            const customerLedgerModule = await import('../../lib/customerLedgerManager')
+            const customerLedgerManager = customerLedgerModule.default
+            customerLedgerManager.setUserId(currentUser.id)
+
+            // Check if ledger entry already exists for this order
+            const { data: existingLedgerEntry } = await supabase
+              .from('customer_ledger')
+              .select('*')
+              .eq('order_id', order.id)
+              .eq('user_id', currentUser.id)
+              .eq('transaction_type', 'debit')
+              .maybeSingle()
+
+            if (existingLedgerEntry) {
+              // Update existing ledger entry if amount changed
+              if (existingLedgerEntry.amount !== paymentData.newTotal) {
+                console.log(`💳 [Delivery Payment] Updating ledger from Rs ${existingLedgerEntry.amount} to Rs ${paymentData.newTotal}`)
+
+                // Delete old entry
+                const { error: deleteError } = await supabase
+                  .from('customer_ledger')
+                  .delete()
+                  .eq('id', existingLedgerEntry.id)
+
+                if (deleteError) {
+                  console.error('⚠️ [Delivery Payment] Error deleting old ledger entry:', deleteError.message)
+                } else {
+                  // Create new entry with updated amount
+                  const currentBalance = await customerLedgerManager.getCustomerBalance(order.customer_id)
+                  const newBalance = currentBalance + paymentData.newTotal
+
+                  const { error: ledgerError } = await supabase
+                    .from('customer_ledger')
+                    .insert({
+                      user_id: currentUser.id,
+                      customer_id: order.customer_id,
+                      transaction_type: 'debit',
+                      amount: paymentData.newTotal,
+                      balance_before: currentBalance,
+                      balance_after: newBalance,
+                      order_id: order.id,
+                      description: `Order #${order.order_number} - ${order.order_type?.toUpperCase() || 'DELIVERY'} (Payment completed)`,
+                      notes: `Payment completed via inline payment modal`,
+                      created_by: currentUser.id
+                    })
+
+                  if (ledgerError) {
+                    console.error('⚠️ [Delivery Payment] Error creating updated ledger entry:', ledgerError.message)
+                  } else {
+                    console.log(`✅ [Delivery Payment] Updated ledger entry: Rs ${paymentData.newTotal} (Balance: ${newBalance})`)
+                  }
+                }
+              } else {
+                console.log('ℹ️ [Delivery Payment] Ledger entry exists with same amount, no update needed')
+              }
+            } else {
+              // Create new ledger entry
+              console.log(`💳 [Delivery Payment] Creating new ledger entry: Rs ${paymentData.newTotal}`)
+
+              const currentBalance = await customerLedgerManager.getCustomerBalance(order.customer_id)
+              const newBalance = currentBalance + paymentData.newTotal
+
+              const { error: ledgerError } = await supabase
+                .from('customer_ledger')
+                .insert({
+                  user_id: currentUser.id,
+                  customer_id: order.customer_id,
+                  transaction_type: 'debit',
+                  amount: paymentData.newTotal,
+                  balance_before: currentBalance,
+                  balance_after: newBalance,
+                  order_id: order.id,
+                  description: `Order #${order.order_number} - ${order.order_type?.toUpperCase() || 'DELIVERY'}`,
+                  notes: `Payment completed via inline payment modal`,
+                  created_by: currentUser.id
+                })
+
+              if (ledgerError) {
+                console.error('⚠️ [Delivery Payment] Error creating ledger entry:', ledgerError.message)
+              } else {
+                console.log(`✅ [Delivery Payment] Created ledger entry: Rs ${paymentData.newTotal} (Balance: ${newBalance})`)
+              }
+            }
+          }
+        } catch (ledgerError) {
+          console.error('❌ [Delivery Payment] Failed to handle customer ledger:', ledgerError)
+          // Don't fail the payment if ledger update fails
+        }
+      }
+
+      // Fetch loyalty redemption for this order
+      let loyaltyDiscountAmount = 0
+      let loyaltyPointsRedeemed = 0
+
+      if (navigator.onLine) {
+        try {
+          const { data: redemption, error: redemptionError } = await supabase
+            .from('loyalty_redemptions')
+            .select('points_used, discount_applied')
+            .eq('order_id', order.order_number)
+            .maybeSingle()
+
+          if (redemptionError) {
+            console.error('❌ Error fetching loyalty for payment:', redemptionError)
+          } else if (redemption) {
+            loyaltyPointsRedeemed = redemption.points_used || 0
+            loyaltyDiscountAmount = redemption.discount_applied || 0
+            console.log('✅ Found loyalty redemption for payment (online):', {
+              loyaltyPointsRedeemed,
+              loyaltyDiscountAmount
+            })
+          } else {
+            console.log('⚠️ No loyalty redemption found for this order')
+          }
+        } catch (error) {
+          console.log('⚠️ Error fetching loyalty:', error)
+        }
+      } else {
+        // Offline: Check cached order for loyalty data
+        console.log('📴 [Payment] Offline mode - checking order for cached loyalty data')
+        const cachedLoyaltyData = {
+          points_used: order.loyalty_points_redeemed || order.loyaltyPointsRedeemed || 0,
+          discount_applied: order.loyalty_discount_amount || order.loyaltyDiscountAmount || 0
+        }
+
+        if (cachedLoyaltyData.points_used > 0 || cachedLoyaltyData.discount_applied > 0) {
+          loyaltyPointsRedeemed = cachedLoyaltyData.points_used
+          loyaltyDiscountAmount = cachedLoyaltyData.discount_applied
+          console.log('✅ [Payment] Found cached loyalty data in order object (offline):', {
+            loyaltyPointsRedeemed,
+            loyaltyDiscountAmount
+          })
+        } else {
+          console.log('⚠️ [Payment] No cached loyalty data found in order object (offline)')
+        }
+      }
+
+      // Fetch deal info for any deals in the order (for proper printing)
+      const dealIds = (order.order_items || []).filter(item => item.is_deal && item.deal_id).map(item => item.deal_id)
+      let dealsMap = new Map()
+
+      if (dealIds.length > 0) {
+        try {
+          if (navigator.onLine) {
+            const { data: deals, error: dealsError } = await supabase
+              .from('deals')
+              .select('*')
+              .in('id', dealIds)
+
+            if (!dealsError && deals) {
+              deals.forEach(deal => dealsMap.set(deal.id, deal))
+              console.log(`✅ [Delivery Payment] Fetched ${deals.length} deal details for modal (online)`)
+            }
+          } else {
+            const cachedDeals = cacheManager.getDeals()
+            cachedDeals.forEach(deal => {
+              if (dealIds.includes(deal.id)) {
+                dealsMap.set(deal.id, deal)
+              }
+            })
+            console.log(`✅ [Delivery Payment] Loaded ${dealsMap.size} deal details from cache (offline)`)
+          }
+        } catch (error) {
+          console.error('[Delivery Payment] Error fetching deal info:', error)
+          const cachedDeals = cacheManager.getDeals()
+          cachedDeals.forEach(deal => {
+            if (dealIds.includes(deal.id)) {
+              dealsMap.set(deal.id, deal)
+            }
+          })
+          console.log(`⚠️ [Delivery Payment] Using cached deals as fallback: ${dealsMap.size} deals`)
+        }
+      }
+
+      // Prepare order data for success modal and printing with normalized deal data
+      const mappedCartItems = (order.order_items || []).map(item => {
+        if (item.is_deal) {
+          let dealProducts = []
+          let dealName = item.product_name
+
+          // Debug: Log raw deal data
+          console.log('🔍 [Delivery Payment] Processing deal item:', {
+            product_name: item.product_name,
+            deal_id: item.deal_id,
+            deal_products_raw: item.deal_products,
+            deal_products_type: typeof item.deal_products
+          })
+
+          // Parse and normalize deal products
+          try {
+            if (item.deal_products) {
+              const parsedProducts = typeof item.deal_products === 'string'
+                ? JSON.parse(item.deal_products)
+                : item.deal_products
+
+              console.log('🔍 [Delivery Payment] Parsed products:', parsedProducts)
+
+              // Normalize the structure
+              dealProducts = parsedProducts.map(product => ({
+                name: product.name || product.product_name || product.productName || 'Unknown Product',
+                quantity: product.quantity || 1,
+                variant: product.variant || product.variant_name || product.variantName || null,
+                flavor: product.flavor || null
+              }))
+
+              console.log(`✅ [Delivery Payment] Normalized ${dealProducts.length} deal products for modal:`, dealProducts)
+            } else {
+              console.warn('⚠️ [Delivery Payment] deal_products is null/undefined for deal:', item.deal_id)
+            }
+          } catch (e) {
+            console.error('❌ [Delivery Payment] Failed to parse deal_products:', e, 'Raw data:', item.deal_products)
+            dealProducts = []
+          }
+
+          // Get deal name from database if missing
+          if (!dealName && item.deal_id && dealsMap.has(item.deal_id)) {
+            const dealInfo = dealsMap.get(item.deal_id)
+            dealName = dealInfo.deal_name
+            console.log(`✅ [Delivery Payment] Retrieved deal name: ${dealName}`)
+          } else if (!dealName) {
+            console.warn('⚠️ [Delivery Payment] Deal name missing for deal_id:', item.deal_id)
+          }
+
+          return {
+            id: item.id,
+            isDeal: true,
+            dealId: item.deal_id,
+            dealName: dealName || 'Deal',
+            dealProducts: dealProducts,
+            quantity: item.quantity,
+            finalPrice: item.final_price,
+            totalPrice: item.total_price
+          }
+        }
+
+        return {
+          id: item.id,
+          isDeal: false,
+          productId: item.product_id,
+          productName: item.product_name,
+          variantId: item.variant_id,
+          variantName: item.variant_name,
+          quantity: item.quantity,
+          finalPrice: item.final_price,
+          totalPrice: item.total_price
+        }
+      })
+
+      const orderData = {
+        orderNumber: order.order_number,
+        total: paymentData.newTotal,
+        subtotal: order.subtotal || paymentData.newTotal,
+        paymentMethod: paymentData.paymentMethod,
+        orderType: order.order_type || 'delivery',
+        tableName: null,
+        discountAmount: paymentData.discountAmount || 0,
+        loyaltyDiscountAmount: loyaltyDiscountAmount,
+        loyaltyPointsRedeemed: loyaltyPointsRedeemed,
+        discountType: paymentData.discountType || 'percentage',
+        discountValue: paymentData.discountValue || 0,
+        changeAmount: paymentData.changeAmount || 0,
+        cashReceived: paymentData.cashAmount || null,
+        cart: mappedCartItems,
+        customer: order.customers || null,
+        orderInstructions: order.order_instructions || '',
+        deliveryCharges: order.delivery_charges || 0,
+        deliveryAddress: order.delivery_address || null,
+        order: order
+      }
+
+      // Set order data and show modal
+      setCompletedOrderData(orderData)
+      setShowSuccessModal(true)
+
+      // Play beep sound
+      playBeepSound()
+
+      // Mark order as completed (this happens in background, modal stays visible)
+      handleOrderStatusUpdate(order, 'Completed').catch(err => {
+        console.error('Error updating order status:', err)
+      })
+
+      // Refresh orders list
+      setOrdersRefreshTrigger(prev => prev + 1)
+
+    } catch (error) {
+      console.error('Error completing payment:', error)
+      notify.error(`Failed to complete payment: ${error.message}`)
+    }
+  }
+
+  // Handle completing an already-paid order (show success modal for printing)
+  const handleCompleteAlreadyPaidOrder = async (order) => {
+    try {
+      // If no order provided (e.g., called from cancel), just refresh the list
+      if (!order) {
+        setOrdersRefreshTrigger(prev => prev + 1)
+        return
+      }
+
+      // Fetch loyalty redemption for this order
+      let loyaltyDiscountAmount = 0
+      let loyaltyPointsRedeemed = 0
+
+      // Check if we're online or offline
+      if (navigator.onLine) {
+        // Online: Try to fetch from database
+        try {
+          const { data: redemption, error: redemptionError } = await supabase
+            .from('loyalty_redemptions')
+            .select('points_used, discount_applied')
+            .eq('order_id', order.order_number)
+            .maybeSingle()
+
+          if (redemptionError) {
+            console.error('❌ Error fetching loyalty for completed order:', redemptionError)
+          } else if (redemption) {
+            loyaltyPointsRedeemed = redemption.points_used || 0
+            loyaltyDiscountAmount = redemption.discount_applied || 0
+            console.log('✅ Found loyalty redemption for completed order (online):', {
+              loyaltyPointsRedeemed,
+              loyaltyDiscountAmount
+            })
+          } else {
+            console.log('⚠️ No loyalty redemption found for this order')
+          }
+        } catch (error) {
+          console.log('⚠️ No loyalty redemption found for this order')
+        }
+      } else {
+        // Offline: Check cached order for loyalty data
+        console.log('📴 [handleCompleteAlreadyPaidOrder] Offline - checking order for cached loyalty data')
+        const cachedLoyaltyData = {
+          points_used: order.loyalty_points_redeemed || order.loyaltyPointsRedeemed || 0,
+          discount_applied: order.loyalty_discount_amount || order.loyaltyDiscountAmount || 0
+        }
+
+        if (cachedLoyaltyData.points_used > 0 || cachedLoyaltyData.discount_applied > 0) {
+          loyaltyPointsRedeemed = cachedLoyaltyData.points_used
+          loyaltyDiscountAmount = cachedLoyaltyData.discount_applied
+          console.log('✅ Found cached loyalty data in order object (offline):', {
+            loyaltyPointsRedeemed,
+            loyaltyDiscountAmount
+          })
+        } else {
+          console.log('⚠️ No cached loyalty data found in order object (offline)')
+        }
+      }
+
+      // Fetch deal info for any deals in the order (for proper printing)
+      const dealIds = (order.order_items || []).filter(item => item.is_deal && item.deal_id).map(item => item.deal_id)
+      let dealsMap = new Map()
+
+      if (dealIds.length > 0) {
+        try {
+          if (navigator.onLine) {
+            const { data: deals, error: dealsError } = await supabase
+              .from('deals')
+              .select('*')
+              .in('id', dealIds)
+
+            if (!dealsError && deals) {
+              deals.forEach(deal => dealsMap.set(deal.id, deal))
+              console.log(`✅ [Delivery Already Paid] Fetched ${deals.length} deal details for modal (online)`)
+            }
+          } else {
+            const cachedDeals = cacheManager.getDeals()
+            cachedDeals.forEach(deal => {
+              if (dealIds.includes(deal.id)) {
+                dealsMap.set(deal.id, deal)
+              }
+            })
+            console.log(`✅ [Delivery Already Paid] Loaded ${dealsMap.size} deal details from cache (offline)`)
+          }
+        } catch (error) {
+          console.error('[Delivery Already Paid] Error fetching deal info:', error)
+          const cachedDeals = cacheManager.getDeals()
+          cachedDeals.forEach(deal => {
+            if (dealIds.includes(deal.id)) {
+              dealsMap.set(deal.id, deal)
+            }
+          })
+          console.log(`⚠️ [Delivery Already Paid] Using cached deals as fallback: ${dealsMap.size} deals`)
+        }
+      }
+
+      // Map order_items with normalized deal data for printer
+      const mappedCartItems = (order.order_items || []).map(item => {
+        if (item.is_deal) {
+          let dealProducts = []
+          let dealName = item.product_name
+
+          // Parse and normalize deal products
+          try {
+            if (item.deal_products) {
+              const parsedProducts = typeof item.deal_products === 'string'
+                ? JSON.parse(item.deal_products)
+                : item.deal_products
+
+              // Normalize the structure
+              dealProducts = parsedProducts.map(product => ({
+                name: product.name || product.product_name || product.productName || 'Unknown Product',
+                quantity: product.quantity || 1,
+                variant: product.variant || product.variant_name || product.variantName || null,
+                flavor: product.flavor || null
+              }))
+
+              console.log(`✅ [Delivery Already Paid] Normalized ${dealProducts.length} deal products`)
+            }
+          } catch (e) {
+            console.error('❌ [Delivery Already Paid] Failed to parse deal_products:', e)
+            dealProducts = []
+          }
+
+          // Get deal name from database if missing
+          if (!dealName && item.deal_id && dealsMap.has(item.deal_id)) {
+            const dealInfo = dealsMap.get(item.deal_id)
+            dealName = dealInfo.deal_name
+          }
+
+          return {
+            id: item.id,
+            isDeal: true,
+            dealId: item.deal_id,
+            dealName: dealName || 'Deal',
+            dealProducts: dealProducts,
+            quantity: item.quantity,
+            finalPrice: item.final_price,
+            totalPrice: item.total_price
+          }
+        }
+
+        return {
+          id: item.id,
+          isDeal: false,
+          productId: item.product_id,
+          productName: item.product_name,
+          variantId: item.variant_id,
+          variantName: item.variant_name,
+          quantity: item.quantity,
+          finalPrice: item.final_price,
+          totalPrice: item.total_price
+        }
+      })
+
+      const orderData = {
+        orderNumber: order.order_number,
+        total: order.total_amount || order.subtotal || 0,
+        subtotal: order.subtotal || order.total_amount || 0,
+        paymentMethod: order.payment_method || 'Cash',
+        orderType: order.order_type || 'delivery',
+        tableName: null,
+        discountAmount: order.discount_amount || 0,
+        loyaltyDiscountAmount: loyaltyDiscountAmount,
+        loyaltyPointsRedeemed: loyaltyPointsRedeemed,
+        discountType: order.discount_percentage > 0 ? 'percentage' : 'fixed',
+        discountValue: order.discount_percentage || order.discount_amount || 0,
+        changeAmount: 0,
+        cashReceived: null,
+        cart: mappedCartItems,
+        customer: order.customers || null,
+        orderInstructions: order.order_instructions || '',
+        deliveryCharges: order.delivery_charges || 0,
+        deliveryAddress: order.delivery_address || null,
+        order: order
+      }
+
+      // Set order data and show modal
+      setCompletedOrderData(orderData)
+      setShowSuccessModal(true)
+
+      // Play beep sound
+      playBeepSound()
+
+      // Mark order as completed (this happens in background, modal stays visible)
+      handleOrderStatusUpdate(order, 'Completed').catch(err => {
+        console.error('Error updating order status:', err)
+      })
+
+      // Refresh orders list
+      setOrdersRefreshTrigger(prev => prev + 1)
+
+    } catch (error) {
+      console.error('Error completing order:', error)
+      notify.error(`Failed to complete order: ${error.message}`)
+    }
+  }
+
+  // Handle print receipt from success modal
+  const handlePrintReceipt = async () => {
+    if (!completedOrderData) return
+
+    setIsPrinting(true)
+    try {
+      // Check if we're in Electron environment
+      if (!printerManager.isElectron()) {
+        notify.warning('Printing is only available in the desktop app.')
+        setIsPrinting(false)
+        return
+      }
+
+      // Set user ID for printer manager
+      if (user?.id) {
+        printerManager.setUserId(user.id)
+      }
+
+      // Get printer configuration
+      const printerConfig = await printerManager.getPrinterForPrinting()
+
+      if (!printerConfig) {
+        notify.warning('No printer configured. Please configure a printer in Settings.')
+        setIsPrinting(false)
+        return
+      }
+
+      // Get user profile data
+      const userProfileRaw = JSON.parse(
+        localStorage.getItem('user_profile') ||
+        localStorage.getItem('user') ||
+        '{}'
+      )
+
+      // Get local assets for offline printing
+      const localLogo = localStorage.getItem('store_logo_local')
+      const localQr = localStorage.getItem('qr_code_local')
+
+      // Get cashier/admin name from completed order
+      const order = completedOrderData.order
+      const cashierName = order?.cashier_id
+        ? (order.cashiers?.name || 'Cashier')
+        : (order?.users?.customer_name || 'Admin')
+
+      const userProfileData = {
+        store_name: userProfileRaw?.store_name || '',
+        store_address: userProfileRaw?.store_address || '',
+        phone: userProfileRaw?.phone || '',
+        // Use local base64/cached logo first, fallback to URL
+        store_logo: localLogo || userProfileRaw?.store_logo || null,
+        // Use local QR first, fallback to URL
+        qr_code: localQr || userProfileRaw?.qr_code || null,
+        hashtag1: userProfileRaw?.hashtag1 || '',
+        hashtag2: userProfileRaw?.hashtag2 || '',
+        show_footer_section: userProfileRaw?.show_footer_section !== false,
+        show_logo_on_receipt: userProfileRaw?.show_logo_on_receipt !== false,
+        show_business_name_on_receipt: userProfileRaw?.show_business_name_on_receipt !== false,
+        // Add cashier/admin name for receipt printing
+        cashier_name: order?.cashier_id ? cashierName : null,
+        customer_name: !order?.cashier_id ? cashierName : null,
+      }
+
+      // Ensure order ID is included at the top level for logo fetching
+      const printData = {
+        ...completedOrderData,
+        orderId: completedOrderData.order?.id || completedOrderData.orderId
+      }
+
+      // Print the receipt
+      const result = await printerManager.printReceipt(
+        printData,
+        userProfileData,
+        printerConfig
+      )
+
+      if (result.success) {
+        notify.success('Receipt printed successfully')
+      } else {
+        notify.error(`Failed to print receipt: ${result.error || 'Unknown error'}`)
+      }
+    } catch (error) {
+      console.error('Error printing receipt:', error)
+      notify.error(`Error printing receipt: ${error.message}`)
+    } finally {
+      setIsPrinting(false)
+    }
+  }
+
+  const handleNewOrderFromSuccess = () => {
+    console.log('🆕 [Delivery] Starting new order, clearing all data')
+    setShowSuccessModal(false)
+    setCompletedOrderData(null)
+    setCart([])
+    setCustomer(null)
+    setOrderInstructions('')
+    setDeliveryTime('')
+    setDeliveryCharges(0)
+    setCurrentView('products')
+    // Clear reopened order state
+    setIsReopenedOrder(false)
+    setOriginalOrderId(null)
+    // Clear localStorage
+    clearSavedData()
+    // Navigate to dashboard
+    router.push('/dashboard')
+  }
+
+  const handlePrintOrder = async (order, loyaltyRedemption = null) => {
+    if (!order) return
+
+    try {
+      if (!user?.id) {
+        toast.error('User not authenticated')
+        return
+      }
+
+      toast.loading('Printing receipt...', { id: 'print-receipt' })
+
+      printerManager.setUserId(user.id)
+      const printer = await printerManager.getPrinterForPrinting()
+
+      if (!printer) {
+        toast.error('No printer configured. Please add a printer in Settings.', { id: 'print-receipt' })
+        return
+      }
+
+      // Fetch order items if not already available
+      let orderItems = order.items || order.order_items || []
+      if (orderItems.length === 0 && order.id) {
+        const { data: items, error } = await cacheManager.supabase
+          .from('order_items')
+          .select('*')
+          .eq('order_id', order.id)
+
+        if (!error && items) {
+          orderItems = items
+        }
+      }
+
+      // Fetch loyalty redemption for this order
+      let loyaltyDiscountAmount = 0
+      let loyaltyPointsRedeemed = 0
+
+      // If loyalty redemption was passed from child component, use it
+      if (loyaltyRedemption) {
+        loyaltyPointsRedeemed = loyaltyRedemption.points_used || 0
+        loyaltyDiscountAmount = loyaltyRedemption.discount_applied || 0
+        console.log('✅ [handlePrintOrder] Using loyalty data from component:', {
+          loyaltyPointsRedeemed,
+          loyaltyDiscountAmount
+        })
+      } else {
+        console.log('🔍 [handlePrintOrder] No loyalty data passed, attempting to fetch')
+
+        // Try online fetch first
+        if (navigator.onLine) {
+          try {
+            const { data: redemption, error: redemptionError } = await supabase
+              .from('loyalty_redemptions')
+              .select('points_used, discount_applied')
+              .eq('order_id', order.order_number)
+              .maybeSingle()
+
+            if (redemptionError) {
+              console.error('❌ Error fetching loyalty for print:', redemptionError)
+            } else if (redemption) {
+              loyaltyPointsRedeemed = redemption.points_used || 0
+              loyaltyDiscountAmount = redemption.discount_applied || 0
+              console.log('✅ Found loyalty redemption from database:', { loyaltyPointsRedeemed, loyaltyDiscountAmount })
+            } else {
+              console.log('⚠️ No loyalty redemption found for order:', order.order_number)
+            }
+          } catch (error) {
+            console.log('⚠️ Error fetching loyalty:', error.message)
+          }
+        } else {
+          // Offline mode - check cached order for loyalty data
+          console.log('📴 [handlePrintOrder] Offline mode - checking order object for cached loyalty data')
+          const cachedLoyaltyData = {
+            points_used: order.loyalty_points_redeemed || order.loyaltyPointsRedeemed || 0,
+            discount_applied: order.loyalty_discount_amount || order.loyaltyDiscountAmount || 0
+          }
+
+          if (cachedLoyaltyData.points_used > 0 || cachedLoyaltyData.discount_applied > 0) {
+            loyaltyPointsRedeemed = cachedLoyaltyData.points_used
+            loyaltyDiscountAmount = cachedLoyaltyData.discount_applied
+            console.log('✅ [handlePrintOrder] Found cached loyalty data in order object:', {
+              loyaltyPointsRedeemed,
+              loyaltyDiscountAmount
+            })
+          } else {
+            console.log('⚠️ [handlePrintOrder] No cached loyalty data found in order object')
+          }
+        }
+      }
+
+      const orderData = {
+        orderNumber: order.order_number,
+        orderType: order.order_type || 'delivery',
+        customer: order.customers || { full_name: order.customer_name, phone: order.customer_phone },
+        deliveryAddress: order.customers?.addressline || order.delivery_address,
+        orderInstructions: order.order_instructions,
+        total: order.total_amount,
+        subtotal: order.subtotal,
+        deliveryCharges: order.delivery_charges || 0,
+        discountAmount: order.discount_amount || 0,
+        loyaltyDiscountAmount: loyaltyDiscountAmount,
+        loyaltyPointsRedeemed: loyaltyPointsRedeemed,
+        discountType: 'amount',
+        cart: orderItems.map((item) => {
+          if (item.is_deal) {
+            let dealProducts = []
+            try {
+              if (item.deal_products) {
+                dealProducts = typeof item.deal_products === 'string'
+                  ? JSON.parse(item.deal_products)
+                  : item.deal_products
+              }
+            } catch (e) {
+              console.error('Failed to parse deal_products:', e)
+            }
+
+            return {
+              isDeal: true,
+              dealId: item.deal_id,
+              dealName: item.product_name,
+              dealProducts: dealProducts,
+              quantity: item.quantity,
+              totalPrice: item.total_price,
+              finalPrice: item.final_price,
+            }
+          }
+          return {
+            isDeal: false,
+            productName: item.product_name,
+            variantName: item.variant_name,
+            quantity: item.quantity,
+            totalPrice: item.total_price,
+            finalPrice: item.final_price,
+          }
+        }),
+        paymentMethod: order.payment_method || 'Cash',
+      }
+
+      // Get user profile
+      const userProfileRaw = JSON.parse(
+        localStorage.getItem('user_profile') ||
+          localStorage.getItem('user') ||
+          '{}'
+      )
+      const userRaw = JSON.parse(localStorage.getItem('user') || '{}')
+
+      // Get local assets for offline printing
+      const localLogo = localStorage.getItem('store_logo_local')
+      const localQr = localStorage.getItem('qr_code_local')
+
+      // Get cashier/admin name from order
+      const cashierName = order.cashier_id
+        ? (order.cashiers?.name || 'Cashier')
+        : (order.users?.customer_name || 'Admin')
+
+      const userProfile = {
+        store_name: userProfileRaw?.store_name || userRaw?.store_name || '',
+        store_address: userProfileRaw?.store_address || userRaw?.store_address || '',
+        phone: userProfileRaw?.phone || userRaw?.phone || '',
+        // Use local base64/cached logo first, fallback to URL
+        store_logo: localLogo || userProfileRaw?.store_logo || userRaw?.store_logo || null,
+        // Use local QR first, fallback to URL
+        qr_code: localQr || userProfileRaw?.qr_code || userRaw?.qr_code || null,
+        hashtag1: userProfileRaw?.hashtag1 || userRaw?.hashtag1 || '',
+        hashtag2: userProfileRaw?.hashtag2 || userRaw?.hashtag2 || '',
+        show_footer_section: userProfileRaw?.show_footer_section !== false,
+        show_logo_on_receipt: userProfileRaw?.show_logo_on_receipt !== false,
+        show_business_name_on_receipt: userProfileRaw?.show_business_name_on_receipt !== false,
+        // Add cashier/admin name for receipt printing
+        cashier_name: order.cashier_id ? cashierName : null,
+        customer_name: !order.cashier_id ? cashierName : null,
+      }
+
+      const result = await printerManager.printReceipt(orderData, userProfile, printer)
+
+      if (result.success) {
+        toast.success('Receipt printed successfully', { id: 'print-receipt' })
+      } else {
+        throw new Error(result.message || result.error || 'Print failed')
+      }
+    } catch (error) {
+      console.error('Print error:', error)
+      toast.error(`Print failed: ${error.message}`, { id: 'print-receipt' })
+    }
+  }
+
+  const handlePrintToken = async (order, loyaltyRedemption = null) => {
+    if (!order) return
+
+    try {
+      if (!user?.id) {
+        toast.error('User not authenticated')
+        return
+      }
+
+      toast.loading('Printing kitchen token...', { id: 'print-token' })
+
+      printerManager.setUserId(user.id)
+      const printer = await printerManager.getPrinterForPrinting()
+
+      if (!printer) {
+        toast.error('No printer configured. Please add a printer in Settings.', { id: 'print-token' })
+        return
+      }
+
+      // Fetch order items if not already available
+      let orderItems = order.items || order.order_items || []
+      if (orderItems.length === 0 && order.id) {
+        const { data: items, error } = await cacheManager.supabase
+          .from('order_items')
+          .select('*')
+          .eq('order_id', order.id)
+
+        if (!error && items) {
+          orderItems = items
+        }
+      }
+
+      const orderData = {
+        orderNumber: order.order_number,
+        orderType: order.order_type || 'delivery',
+        customerName: order.customers?.full_name || order.customer_name || '',
+        customerPhone: order.customers?.phone || order.customer_phone || '',
+        specialNotes: order.order_instructions || '',
+        items: orderItems.map((item) => {
+          if (item.is_deal) {
+            let dealProducts = []
+            try {
+              if (item.deal_products) {
+                dealProducts = typeof item.deal_products === 'string'
+                  ? JSON.parse(item.deal_products)
+                  : item.deal_products
+              }
+            } catch (e) {
+              console.error('Failed to parse deal_products:', e)
+            }
+
+            return {
+              name: item.product_name,
+              quantity: item.quantity,
+              notes: item.notes || '',
+              isDeal: true,
+              dealProducts: dealProducts,
+            }
+          }
+          return {
+            name: item.product_name,
+            size: item.variant_name,
+            quantity: item.quantity,
+            notes: item.notes || '',
+            isDeal: false,
+          }
+        }),
+      }
+
+      // Get user profile
+      const userProfileRaw = JSON.parse(
+        localStorage.getItem('user_profile') ||
+          localStorage.getItem('user') ||
+          '{}'
+      )
+      const userRaw = JSON.parse(localStorage.getItem('user') || '{}')
+
+      // Get cashier/admin name from order
+      const cashierName = order.cashier_id
+        ? (order.cashiers?.name || 'Cashier')
+        : (order.users?.customer_name || 'Admin')
+
+      const userProfile = {
+        store_name: userProfileRaw?.store_name || userRaw?.store_name || '',
+        store_address: userProfileRaw?.store_address || userRaw?.store_address || '',
+        phone: userProfileRaw?.phone || userRaw?.phone || '',
+        store_logo: userProfileRaw?.store_logo || userRaw?.store_logo || null,
+        // Add cashier/admin name for kitchen token printing
+        cashier_name: order.cashier_id ? cashierName : null,
+        customer_name: !order.cashier_id ? cashierName : null,
+      }
+
+      const result = await printerManager.printKitchenToken(orderData, userProfile, printer)
+
+      if (result.success) {
+        toast.success('Kitchen token printed successfully', { id: 'print-token' })
+      } else {
+        throw new Error(result.message || result.error || 'Print failed')
+      }
+    } catch (error) {
+      console.error('Kitchen token print error:', error)
+      toast.error(`Print failed: ${error.message}`, { id: 'print-token' })
+    }
+  }
+
+  const getProductsByCategory = (categoryId) => {
+    return allProducts.filter(product => product.category_id === categoryId)
+  }
+
+  const getProductCount = (categoryId) => {
+    return getProductsByCategory(categoryId).length
+  }
+
+  const handleCustomerFormSubmit = (data) => {
+    console.log('🚴 Delivery Boy ID:', data.deliveryBoyId)
+
+    setCustomer(data.customer)
+    setOrderInstructions(data.orderInstructions)
+    setDeliveryTime(data.deliveryTime)
+    setDeliveryCharges(data.deliveryCharges)
+
+    if (data.customer) {
+      localStorage.setItem('delivery_boy_id', data.deliveryBoyId || '')
+    }
+
+    setShowCustomerForm(false)
+  }
+
+  const handleBackClick = () => {
+    if (currentView !== 'products') {
+      setCurrentView('products')
+      setSelectedProduct(null)
+      setSelectedDeal(null)
+      return
+    }
+
+    if (cart.length > 0) {
+      setShowExitModal(true)
+    } else {
+      clearSavedData()
+      router.push('/dashboard/')
+    }
+  }
+
+  const clearSavedData = () => {
+    console.log('🧹 [Delivery] Clearing saved data')
+    localStorage.removeItem('delivery_cart')
+    localStorage.removeItem('delivery_customer')
+    localStorage.removeItem('delivery_instructions')
+    localStorage.removeItem('delivery_time')
+    localStorage.removeItem('delivery_charges')
+    localStorage.removeItem('delivery_boy_id')
+    localStorage.removeItem('delivery_reopened')
+    localStorage.removeItem('delivery_original_order')
+    localStorage.removeItem('delivery_modifying_order')
+    localStorage.removeItem('delivery_modifying_order_number')
+    localStorage.removeItem('delivery_original_state')
+  }
+
+  const handleConfirmExit = () => {
+    clearSavedData()
+    setCart([])
+    notify.info('Order discarded')
+    router.push('/dashboard/')
+  }
+
+  const handleSaveAndExit = () => {
+    notify.success('Order saved for later')
+    router.push('/dashboard/')
+  }
+
+  const handleOrderAndPay = async () => {
+    console.log('🔵 [Delivery] handleOrderAndPay called')
+
+    if (cart.length === 0) {
+      notify.warning('Please add items to cart before proceeding')
+      return
+    }
+
+    // Find the Delivery order type ID
+    const deliveryOrderType = orderTypes.find(ot => ot.name?.toLowerCase() === 'delivery')
+    const orderTypeId = deliveryOrderType?.id || null
+
+    if (!orderTypeId) {
+      console.warn('⚠️ [Delivery] order_type_id not found for Delivery')
+    } else {
+      console.log('✅ [Delivery] order_type_id:', orderTypeId)
+    }
+
+    const orderData = {
+      cart,
+      customer,
+      orderInstructions,
+      deliveryAddress: customer?.addressline || customer?.address || '',
+      deliveryTime,
+      deliveryCharges,
+      deliveryBoyId: localStorage.getItem('delivery_boy_id') || null,
+      subtotal: calculateSubtotal(),
+      total: calculateTotal(),
+      orderType: 'delivery',
+      orderTypeId: orderTypeId, // 🆕 Added order_type_id for inventory deduction
+      cashierId: cashierData?.id || null,
+      userId: user?.id,
+      sessionId: sessionId,
+      isModifying: isReopenedOrder,
+      existingOrderId: originalOrderId,
+      existingOrderNumber: localStorage.getItem('delivery_modifying_order_number'),
+      // 🆕 Include original payment information for modified order payment calculation
+      originalPaymentStatus: localStorage.getItem('delivery_original_payment_status'),
+      originalAmountPaid: parseFloat(localStorage.getItem('delivery_original_amount_paid')) || 0,
+      originalPaymentMethod: localStorage.getItem('delivery_original_payment_method')
+    }
+
+    console.log('🔵 [Delivery] Order data prepared:', orderData)
+
+    if (isReopenedOrder && originalOrderId) {
+      const originalStateStr = localStorage.getItem('delivery_original_state')
+      if (originalStateStr) {
+        const originalState = JSON.parse(originalStateStr)
+
+        const changes = {
+          itemsAdded: [],
+          itemsRemoved: [],
+          itemsModified: [],
+          oldSubtotal: originalState.subtotal,
+          newSubtotal: orderData.subtotal,
+          oldTotal: originalState.total,
+          newTotal: orderData.total,
+          oldItemCount: originalState.itemCount,
+          newItemCount: cart.length
+        }
+
+        originalState.items.forEach(oldItem => {
+          const itemName = oldItem.isDeal ? oldItem.dealName : oldItem.productName
+          const itemVariant = oldItem.isDeal ? null : oldItem.variantName
+
+          const stillExists = cart.find(newItem => {
+            const newItemName = newItem.isDeal ? newItem.dealName : newItem.productName
+            const newItemVariant = newItem.isDeal ? null : newItem.variantName
+            return newItemName === itemName && newItemVariant === itemVariant
+          })
+
+          if (!stillExists) {
+            changes.itemsRemoved.push({
+              name: itemName,
+              variant: itemVariant,
+              quantity: oldItem.quantity,
+              price: oldItem.totalPrice
+            })
+          }
+        })
+
+        cart.forEach(newItem => {
+          const itemName = newItem.isDeal ? newItem.dealName : newItem.productName
+          const itemVariant = newItem.isDeal ? null : newItem.variantName
+
+          const oldItem = originalState.items.find(old => {
+            const oldItemName = old.isDeal ? old.dealName : old.productName
+            const oldItemVariant = old.isDeal ? null : old.variantName
+            return oldItemName === itemName && oldItemVariant === itemVariant
+          })
+
+          if (!oldItem) {
+            changes.itemsAdded.push({
+              name: itemName,
+              variant: itemVariant,
+              quantity: newItem.quantity,
+              price: newItem.totalPrice
+            })
+          } else if (oldItem.quantity !== newItem.quantity) {
+            changes.itemsModified.push({
+              name: itemName,
+              variant: itemVariant,
+              oldQuantity: oldItem.quantity,
+              newQuantity: newItem.quantity,
+              oldPrice: oldItem.totalPrice,
+              newPrice: newItem.totalPrice
+            })
+          }
+        })
+
+        orderData.detailedChanges = changes
+      }
+    }
+
+    console.log('🔵 [Delivery] Saving order_data to localStorage')
+    localStorage.setItem('order_data', JSON.stringify(orderData))
+    console.log('🔵 [Delivery] Navigating to payment page')
+    notify.info('Proceeding to payment...')
+    router.push('/payment')
+  }
+
+  const classes = themeManager.getClasses()
+  const isDark = themeManager.isDark()
+
+  if (isLoading || !isDataReady) {
+    return (
+      <div className={`h-screen flex items-center justify-center ${classes.background} transition-all duration-500`}>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-green-600 border-t-transparent mx-auto mb-4"></div>
+          <h3 className={`text-xl font-bold ${classes.textPrimary} mb-2`}>Loading Menu Data</h3>
+          <p className={`${classes.textSecondary} mb-4`}>Please wait while we load your products and deals...</p>
+
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <ProtectedPage permissionKey="SALES_DELIVERY" pageName="Delivery Orders">
+      <div className={`h-screen flex ${classes.background} overflow-hidden transition-all duration-500`}>
+      <Toaster
+        position="top-right"
+        reverseOrder={false}
+        gutter={8}
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: isDark ? '#1f2937' : '#fff',
+            color: isDark ? '#f3f4f6' : '#111827',
+            border: isDark ? '1px solid #374151' : '1px solid #e5e7eb',
+          },
+          success: {
+            duration: 3000,
+            iconTheme: {
+              primary: '#10b981',
+              secondary: '#fff',
+            },
+          },
+          error: {
+            duration: 4000,
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#fff',
+            },
+          },
+        }}
+      />
+
+      {/* Left Sidebar - Categories or Orders List */}
+      {showOrdersView ? (
+        <WalkinOrdersSidebar
+          onOrderSelect={handleOrderSelect}
+          onClose={handleCloseOrdersView}
+          classes={classes}
+          isDark={isDark}
+          selectedOrderId={selectedOrder?.id}
+          onBackClick={handleBackClick}
+          orderType="delivery"
+          refreshTrigger={ordersRefreshTrigger}
+        />
+      ) : (
+        <CategorySidebar
+          categories={categories}
+          deals={deals}
+          onCategoryClick={scrollToCategory}
+          onDealClick={handleDealClick}
+          getProductCount={getProductCount}
+          onBackClick={handleBackClick}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          networkStatus={networkStatus}
+          classes={classes}
+          isDark={isDark}
+          orderType="delivery"
+          isReopenedOrder={isReopenedOrder}
+          onOrdersClick={handleOrdersClick}
+          showOrdersView={showOrdersView}
+        />
+      )}
+
+      {currentView === 'products' && (
+        <ProductGrid
+          ref={productGridRef}
+          categories={categories}
+          deals={deals}
+          allProducts={allProducts}
+          onProductClick={handleProductClick}
+          onDealClick={handleDealClick}
+          classes={classes}
+          isDark={isDark}
+          networkStatus={networkStatus}
+          selectedCategoryId={selectedCategoryId}
+        />
+      )}
+
+      {currentView === 'variant' && (
+        <VariantSelectionScreen
+          product={selectedProduct}
+          variants={productVariants}
+          onAddToCart={handleAddToCart}
+          onBack={() => setCurrentView('products')}
+          classes={classes}
+          isDark={isDark}
+        />
+      )}
+
+      {currentView === 'deal' && (
+        <DealFlavorSelectionScreen
+          deal={selectedDeal}
+          dealProducts={dealProducts}
+          onAddToCart={handleAddToCart}
+          onBack={() => setCurrentView('products')}
+          classes={classes}
+          isDark={isDark}
+        />
+      )}
+
+      {currentView === 'orders' && (
+        <WalkinOrderDetails
+          order={selectedOrder}
+          classes={classes}
+          isDark={isDark}
+          onPrint={handlePrintOrder}
+          onPrintToken={handlePrintToken}
+          onMarkReady={(order) => handleOrderStatusUpdate(order, 'Ready')}
+          onComplete={handleCompleteAlreadyPaidOrder}
+          onPaymentRequired={handlePaymentRequired}
+          orderType="delivery"
+        />
+      )}
+
+      <CartSidebar
+        cart={cart}
+        customer={customer}
+        orderInstructions={orderInstructions}
+        onUpdateQuantity={updateCartItemQuantity}
+        onRemoveItem={removeCartItem}
+        onShowCustomerForm={() => setShowCustomerForm(true)}
+        onOrderAndPay={handleOrderAndPay}
+        onClearCart={handleClearCart}
+        calculateSubtotal={calculateSubtotal}
+        calculateTotal={calculateTotal}
+        classes={classes}
+        isDark={isDark}
+        networkStatus={networkStatus}
+        orderType="delivery"
+        isReopenedOrder={isReopenedOrder}
+      />
+
+      <DeliveryCustomerForm
+        isOpen={showCustomerForm}
+        onClose={() => setShowCustomerForm(false)}
+        onSubmit={handleCustomerFormSubmit}
+        customer={customer}
+        deliveryTime={deliveryTime}
+        deliveryCharges={deliveryCharges}
+        orderInstructions={orderInstructions}
+      />
+
+      <Modal
+        isOpen={showExitModal}
+        onClose={() => setShowExitModal(false)}
+        title="Save your order?"
+        maxWidth="max-w-md"
+      >
+        <div className="text-center space-y-6">
+          <div className={`w-16 h-16 ${isDark ? 'bg-yellow-900/20' : 'bg-yellow-100'} rounded-full flex items-center justify-center mx-auto`}>
+            <FileText className={`w-8 h-8 ${isDark ? 'text-yellow-400' : 'text-yellow-600'}`} />
+          </div>
+          <p className={`${classes.textSecondary}`}>
+            You have items in your cart. Would you like to save your progress or discard the order?
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              onClick={handleSaveAndExit}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg"
+            >
+              Save & Exit
+            </button>
+            <button
+              onClick={handleConfirmExit}
+              className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg"
+            >
+              Discard & Exit
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Success Modal */}
+      <AnimatePresence>
+        {showSuccessModal && completedOrderData && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={`${classes.card} rounded-3xl ${classes.shadow} shadow-2xl p-8 max-w-md w-full text-center ${classes.border} border`}
+            >
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+                className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${
+                  isDark ? 'bg-green-900/30' : 'bg-green-100'
+                }`}
+              >
+                <Check className={`w-10 h-10 ${isDark ? 'text-green-400' : 'text-green-600'}`} />
+              </motion.div>
+
+              <h1 className={`text-2xl font-bold ${classes.textPrimary} mb-2`}>
+                Payment Complete!
+              </h1>
+              <p className={`${classes.textSecondary} mb-6`}>
+                Order has been successfully completed
+              </p>
+
+              <div className={`${isDark ? 'bg-gray-800/50' : 'bg-gray-50'} rounded-2xl p-4 mb-6 ${classes.border} border`}>
+                <p className={`text-sm ${classes.textSecondary} mb-1`}>Order Number</p>
+                <p className="text-2xl font-bold text-purple-600">{completedOrderData.orderNumber}</p>
+              </div>
+
+              <div className="space-y-2 mb-6 text-left">
+                <div className="flex justify-between">
+                  <span className={classes.textSecondary}>Total Amount:</span>
+                  <span className={`font-semibold ${classes.textPrimary}`}>
+                    Rs {completedOrderData.total.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className={classes.textSecondary}>Payment Method:</span>
+                  <span className={`font-semibold ${classes.textPrimary}`}>{completedOrderData.paymentMethod}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className={classes.textSecondary}>Order Type:</span>
+                  <span className={`font-semibold ${classes.textPrimary} capitalize`}>{completedOrderData.orderType}</span>
+                </div>
+                {completedOrderData.deliveryCharges > 0 && (
+                  <div className="flex justify-between">
+                    <span className={classes.textSecondary}>Delivery Charges:</span>
+                    <span className={`font-semibold ${classes.textPrimary}`}>Rs {completedOrderData.deliveryCharges.toFixed(2)}</span>
+                  </div>
+                )}
+                {completedOrderData.deliveryAddress && (
+                  <div className="flex justify-between">
+                    <span className={classes.textSecondary}>Delivery Address:</span>
+                    <span className={`font-semibold ${classes.textPrimary} text-right ml-2`}>{completedOrderData.deliveryAddress}</span>
+                  </div>
+                )}
+                {completedOrderData.discountAmount > 0 && (
+                  <div className={`flex justify-between ${isDark ? 'text-green-400' : 'text-green-600'}`}>
+                    <span>Discount Applied:</span>
+                    <span className="font-semibold">Rs {completedOrderData.discountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+                {completedOrderData.loyaltyPointsRedeemed > 0 && (
+                  <div className={`flex justify-between ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>
+                    <span>Loyalty Points Used:</span>
+                    <span className="font-semibold">{completedOrderData.loyaltyPointsRedeemed} pts (-Rs {(completedOrderData.loyaltyDiscountAmount || 0).toFixed(2)})</span>
+                  </div>
+                )}
+                {completedOrderData.changeAmount > 0 && (
+                  <div className={`flex justify-between ${isDark ? 'text-green-400' : 'text-green-600'}`}>
+                    <span>Change to Return:</span>
+                    <span className="font-semibold">Rs {completedOrderData.changeAmount.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handlePrintReceipt}
+                  disabled={isPrinting}
+                  className={`w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-semibold rounded-xl transition-all duration-200 flex items-center justify-center ${
+                    isPrinting ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {isPrinting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                      Printing...
+                    </>
+                  ) : (
+                    <>
+                      <Printer className="w-5 h-5 mr-2" />
+                      Print Receipt
+                    </>
+                  )}
+                </motion.button>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleNewOrderFromSuccess}
+                  className="w-full px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-all duration-200"
+                >
+                  New Order
+                </motion.button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      </div>
+    </ProtectedPage>
+  )
+}
