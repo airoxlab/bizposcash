@@ -30,8 +30,7 @@ import {
   Database,
   X,
   Trash2,
-  CloudUpload,
-  Download
+  CloudUpload
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { cacheManager } from '../../lib/cacheManager'
@@ -41,7 +40,6 @@ import { webOrderNotificationManager } from '../../lib/webOrderNotification'
 import { networkPrintListener } from '../../lib/networkPrintListener'
 import ProtectedPage from '../../components/ProtectedPage'
 import { usePermissions, permissionManager } from '../../lib/permissionManager'
-import UpdateNotification from '../../components/UpdateNotification'
 
 export default function Dashboard() {
   const [user, setUser] = useState(null)
@@ -339,14 +337,6 @@ export default function Dashboard() {
       gradient: 'from-cyan-500 to-blue-600',
       route: '/marketing',
       permissionKey: 'MARKETING'
-    },
-    {
-      id: 'ledger',
-      title: 'Ledger',
-      icon: Download,
-      gradient: 'from-teal-500 to-green-600',
-      route: '/ledger',
-      permissionKey: 'REPORTS'
     }
   ]
 
@@ -754,7 +744,6 @@ export default function Dashboard() {
         </motion.div>
       </main>
       </div>
-      <UpdateNotification />
     </ProtectedPage>
   )
 }

@@ -1,6 +1,6 @@
 {
   "name": "BizPOS",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Modern POS Software - BizPOS",
   "main": "electron/main.js",
   "homepage": "./",
@@ -35,7 +35,6 @@
     "electron-updater": "^6.7.3",
     "framer-motion": "^12.23.12",
     "jimp": "^1.6.0",
-    "jspdf": "^2.5.2",
     "lottie-react": "^2.4.1",
     "lucide-react": "^0.539.0",
     "net": "^1.0.2",
@@ -71,7 +70,7 @@
       {
         "provider": "github",
         "owner": "airoxlab",
-        "repo": "bizposcashier2026"
+        "repo": "bizposcash"
       }
     ],
     "asar": true,

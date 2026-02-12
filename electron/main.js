@@ -224,15 +224,8 @@ app.whenReady().then(() => {
   registerMarketingHandlers(ipcMain);
   registerAssetHandlers(ipcMain);
 
-  // Check for updates after app starts (only in production)
-  // NOTE: Using checkForUpdates() instead of checkForUpdatesAndNotify()
-  // This will ONLY notify, NOT auto-download. User must click "Download Now" button.
-  if (!isDev) {
-    log.info('Checking for updates on startup...');
-    setTimeout(() => {
-      autoUpdater.checkForUpdates();
-    }, 3000); // Wait 3 seconds after startup
-  }
+  // Update check is now manual from Settings > Updates page
+  // No automatic check on startup to avoid timing issues
 
   // Register kitchen token printer - supports both USB and IP
   ipcMain.handle('print-kitchen-token', async (event, { orderData, userProfile, printerConfig }) => {
