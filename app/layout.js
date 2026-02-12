@@ -2,7 +2,6 @@ import './globals.css'
 import Script from 'next/script'
 import NotificationSystem from '../components/ui/NotificationSystem'
 import GlobalPrintListener from '../components/GlobalPrintListener'
-import UpdateNotification from '../components/UpdateNotification'
 
 export const metadata = {
   title: 'BizPOS - Point of Sale System',
@@ -32,7 +31,6 @@ export default function RootLayout({ children }) {
         <GlobalPrintListener />
         {children}
         <NotificationSystem />
-        <UpdateNotification />
       </body>
     </html>
   )
