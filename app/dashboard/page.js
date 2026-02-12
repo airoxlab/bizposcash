@@ -30,7 +30,8 @@ import {
   Database,
   X,
   Trash2,
-  CloudUpload
+  CloudUpload,
+  BookOpen
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { cacheManager } from '../../lib/cacheManager'
@@ -297,6 +298,14 @@ export default function Dashboard() {
       gradient: 'from-pink-500 to-rose-600',
       route: '/orders',
       permissionKey: 'ORDERS'
+    },
+    {
+      id: 'ledger',
+      title: 'Ledger',
+      icon: BookOpen,
+      gradient: 'from-indigo-500 to-purple-600',
+      route: '/ledger',
+      permissionKey: 'REPORTS'
     },
     {
       id: 'web-orders',
