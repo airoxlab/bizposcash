@@ -225,10 +225,12 @@ app.whenReady().then(() => {
   registerAssetHandlers(ipcMain);
 
   // Check for updates after app starts (only in production)
+  // NOTE: Using checkForUpdates() instead of checkForUpdatesAndNotify()
+  // This will ONLY notify, NOT auto-download. User must click "Download Now" button.
   if (!isDev) {
     log.info('Checking for updates on startup...');
     setTimeout(() => {
-      autoUpdater.checkForUpdatesAndNotify();
+      autoUpdater.checkForUpdates();
     }, 3000); // Wait 3 seconds after startup
   }
 
