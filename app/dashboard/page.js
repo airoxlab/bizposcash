@@ -397,11 +397,7 @@ export default function Dashboard() {
   const roleBadge = getRoleBadge()
 
   if (!user) {
-    return (
-      <div className={`min-h-screen ${themeClasses.background} flex items-center justify-center transition-all duration-500`}>
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-purple-600"></div>
-      </div>
-    )
+    return null
   }
 
   return (

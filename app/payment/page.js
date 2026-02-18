@@ -500,23 +500,26 @@ const processOrder = async () => {
       console.log('🔄 Modifying existing order (ONLINE):', orderData.existingOrderId)
 
       // Update existing order - WITH delivery_charges and delivery_time
+      // Preserve the original order status (e.g. 'Preparing') so editing doesn't revert it to Pending
+      const preservedOrderStatus = orderData.originalOrderStatus || 'Pending'
       const { error: updateError } = await supabase
         .from('orders')
         .update({
+          order_type: orderData.orderType, // Preserve order_type so kitchen shows correct type
           subtotal: orderData.subtotal,
           discount_amount: discountAmount || 0,
           discount_percentage: discountType === 'percentage' ? discountValue : 0,
-          delivery_charges: orderData.deliveryCharges || 0, // FIX: Add delivery charges
-          delivery_boy_id: orderData.deliveryBoyId || null, // FIX: Add delivery boy
-          delivery_address: orderData.deliveryAddress || '', // Store delivery address
-          table_id: orderData.tableId || null, // Add table_id for walkin orders
+          delivery_charges: orderData.deliveryCharges || 0,
+          delivery_boy_id: orderData.deliveryBoyId || null,
+          delivery_address: orderData.deliveryAddress || '',
+          table_id: orderData.tableId || null,
           total_amount: orderData.total,
           payment_method: selectedPaymentMethod.name,
           payment_status: (selectedPaymentMethod.id === 'unpaid' || selectedPaymentMethod.id === 'account') ? 'Pending' : 'Paid',
-          order_status: 'Pending',
+          order_status: preservedOrderStatus,
           order_instructions: orderData.orderInstructions || '',
-          delivery_time: deliveryTimeForDB, // FIX: Add delivery time
-          takeaway_time: takeawayTimeForDB, // Also add takeaway time
+          delivery_time: deliveryTimeForDB,
+          takeaway_time: takeawayTimeForDB,
           updated_at: new Date().toISOString(),
           modified_by_cashier_id: cashier?.id || null
         })
@@ -610,7 +613,7 @@ const processOrder = async () => {
         }
       }
 
-      // Log detailed modification with item changes
+      // Log detailed modification with item changes (authManager also saves to order_item_changes)
       await authManager.logOrderAction(
         orderData.existingOrderId,
         'modified',
@@ -621,6 +624,15 @@ const processOrder = async () => {
         },
         `Order modified and payment completed by ${cashier?.name || 'Admin'}`
       )
+
+      // Cache item changes for reprint display (authManager.logOrderAction already wrote to DB above)
+      if (orderData.detailedChanges) {
+        const { saveChangesOffline } = await import('../../lib/utils/orderChangesTracker')
+        const result = await saveChangesOffline(orderData.existingOrderId, orderData.existingOrderNumber, orderData.detailedChanges, { cacheOnly: true })
+        if (result?.success) {
+          console.log(`💾 Cached ${result.changesCount} item changes for reprint (DB already written by logOrderAction)`)
+        }
+      }
 
       setOrderNumber(orderData.existingOrderNumber)
       setIsOfflineOrder(false)
@@ -647,7 +659,9 @@ const processOrder = async () => {
         total_amount: orderData.total,
         payment_method: selectedPaymentMethod.name,
         payment_status: (selectedPaymentMethod.id === 'unpaid' || selectedPaymentMethod.id === 'account') ? 'Pending' : 'Paid',
-        order_status: 'Pending',
+        order_status: orderData.isModifying && orderData.originalOrderStatus
+          ? orderData.originalOrderStatus
+          : 'Pending',
         order_instructions: orderData.orderInstructions || '',
         delivery_time: deliveryTimeForDB, // FIX: Add delivery time
         takeaway_time: takeawayTimeForDB, // Also add takeaway time
@@ -668,12 +682,14 @@ const processOrder = async () => {
       console.log(`💰 Delivery charges: Rs ${orderData.deliveryCharges || 0}`)
       console.log(`🕐 Delivery time: ${orderData.deliveryTime || 'N/A'}`)
 
-      // 🆕 Save item changes offline for later sync and printing
-      if (orderData.isModifying && orderData.detailedChanges && order._isOffline) {
+      // Cache item changes for reprint display
+      // cacheManager.createOrder() already called authManager.logOrderAction() which handles DB writes
+      // (online: writes directly; offline: queued via syncOfflineHistory - no need for pending_order_changes_sync)
+      if (orderData.isModifying && orderData.detailedChanges) {
         const { saveChangesOffline } = await import('../../lib/utils/orderChangesTracker')
-        const result = await saveChangesOffline(order.id, newOrderNumber, orderData.detailedChanges)
-        if (result.success) {
-          console.log(`💾 Saved ${result.changesCount} item changes offline for sync`)
+        const result = await saveChangesOffline(order.id, newOrderNumber, orderData.detailedChanges, { cacheOnly: true })
+        if (result?.success) {
+          console.log(`💾 Cached ${result.changesCount} item changes for reprint`)
         }
       }
 
@@ -779,6 +795,7 @@ const processOrder = async () => {
     localStorage.removeItem('walkin_modifying_order')
     localStorage.removeItem('walkin_modifying_order_number')
     localStorage.removeItem('walkin_original_state')
+    localStorage.removeItem('walkin_original_order_status')
     localStorage.removeItem('walkin_table')
     localStorage.removeItem('delivery_cart')
     localStorage.removeItem('delivery_customer')
@@ -1090,50 +1107,33 @@ const handlePrintKitchenToken = async () => {
         const itemName = item.name
         const itemVariant = item.size || ''
 
-        // Check if item was added
+        // Check if item was brand-new added
         const wasAdded = changes.itemsAdded?.some(added =>
           added.name === itemName && (added.variant || '') === itemVariant
         )
 
-        // Check if item was modified (quantity changed)
+        // Check if item quantity was modified
         const wasModified = changes.itemsModified?.find(modified =>
           modified.name === itemName && (modified.variant || '') === itemVariant
         )
 
         if (wasAdded) {
           return { ...item, changeType: 'added' }
-        } else if (wasModified && wasModified.newQuantity > wasModified.oldQuantity) {
-          // Quantity increased - show only the increase as added
-          const originalQuantity = wasModified.oldQuantity
-          const addedQuantity = wasModified.newQuantity - wasModified.oldQuantity
-
-          // We'll show two entries: unchanged for old qty, added for new qty
-          return { ...item, changeType: 'unchanged', quantity: originalQuantity, _hasIncrease: true, _increaseQty: addedQuantity }
+        } else if (wasModified) {
+          // Show old→new quantity on a single line (no duplicate entries)
+          return {
+            ...item,
+            changeType: 'modified',
+            oldQuantity: wasModified.oldQuantity,
+            newQuantity: wasModified.newQuantity,
+            quantity: wasModified.newQuantity
+          }
         }
 
         return { ...item, changeType: 'unchanged' }
       })
 
-      // Add separate entries for quantity increases
-      const increaseItems = []
-      mappedItems.forEach(item => {
-        if (item._hasIncrease) {
-          increaseItems.push({
-            name: item.name,
-            size: item.size,
-            quantity: item._increaseQty,
-            notes: item.notes,
-            isDeal: item.isDeal,
-            dealProducts: item.dealProducts,
-            changeType: 'added'
-          })
-          // Clean up temporary flags
-          delete item._hasIncrease
-          delete item._increaseQty
-        }
-      })
-
-      // Add removed items
+      // Add completely removed items
       const removedItems = []
       if (changes.itemsRemoved && changes.itemsRemoved.length > 0) {
         changes.itemsRemoved.forEach(removed => {
@@ -1148,25 +1148,8 @@ const handlePrintKitchenToken = async () => {
         })
       }
 
-      // Handle quantity decreases
-      if (changes.itemsModified) {
-        changes.itemsModified.forEach(modified => {
-          if (modified.newQuantity < modified.oldQuantity) {
-            // Quantity decreased - show as removed
-            removedItems.push({
-              name: modified.name,
-              size: modified.variant || '',
-              quantity: modified.oldQuantity - modified.newQuantity,
-              notes: '',
-              isDeal: false,
-              changeType: 'removed'
-            })
-          }
-        })
-      }
-
-      // Merge all items
-      mappedItems = [...mappedItems, ...increaseItems, ...removedItems]
+      // Merge: current items (with change types) + completely removed items
+      mappedItems = [...mappedItems, ...removedItems]
 
     } else if (orderData.orderId) {
       // Existing order - fetch changes from database
@@ -1301,7 +1284,9 @@ const handlePrintKitchenToken = async () => {
         payment_method: 'Split',
         payment_status: paymentStatus,
         amount_paid: totalPaidAmount,
-        order_status: 'Pending',
+        order_status: orderData.isModifying && orderData.originalOrderStatus
+          ? orderData.originalOrderStatus
+          : 'Pending',
         order_instructions: orderData.orderInstructions || '',
         delivery_time: deliveryTimeForDB,
         takeaway_time: takeawayTimeForDB,
@@ -1446,14 +1431,7 @@ const handlePrintKitchenToken = async () => {
   const isDark = themeManager.isDark()
 
   if (!orderData) {
-    return (
-      <div className={`min-h-screen ${classes.background} flex items-center justify-center transition-all duration-500`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <p className={classes.textSecondary}>Loading order data...</p>
-        </div>
-      </div>
-    )
+    return null
   }
 if (orderComplete) {
   return (

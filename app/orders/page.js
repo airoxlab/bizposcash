@@ -48,6 +48,7 @@ import { authManager } from "../../lib/authManager";
 import { printerManager } from "../../lib/printerManager";
 import { cacheManager } from "../../lib/cacheManager";
 import { usePermissions } from "../../lib/permissionManager";
+import { webOrderNotificationManager } from "../../lib/webOrderNotification";
 import dailySerialManager from "../../lib/utils/dailySerialManager";
 import { getTodaysBusinessDate, getBusinessDate } from "../../lib/utils/businessDayUtils";
 import Modal from "../../components/ui/Modal";
@@ -282,6 +283,26 @@ export default function OrdersPage() {
         },
         (payload) => {
           console.log("🔔 [Orders Page] Realtime update:", payload);
+
+          // Check for new Mobile App orders and show notification
+          if (payload.eventType === "INSERT" &&
+              payload.new?.original_order_source === "Mobile App" &&
+              payload.new?.is_approved === false) {
+            console.log("📱 [Orders Page] ✅ New Mobile App order inserted:", payload.new.order_number);
+
+            // Play beep sound
+            webOrderNotificationManager.playBeepSound();
+
+            // Show notification
+            notify.success(
+              `📱 New Mobile App Order: ${payload.new.order_number}`,
+              {
+                duration: 8000,
+                description: 'Order received and ready to approve'
+              }
+            );
+          }
+
           // Refresh orders list
           fetchOrders();
         }
@@ -2135,9 +2156,7 @@ export default function OrdersPage() {
                         Loading...
                       </span>
                     ) : (
-                      `Load 100 More (${
-                        totalAvailable - orders.length
-                      } remaining)`
+                      `Load 100 More (${totalAvailable - orders.length} remaining)`
                     )}
                   </motion.button>
                 </div>
@@ -2148,16 +2167,7 @@ export default function OrdersPage() {
       </div>
 
       <div className={`flex-1 flex flex-col ${themeClasses.card}`}>
-        {loading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent mx-auto mb-4"></div>
-              <p className={`${themeClasses.textSecondary} font-medium`}>
-                Loading order details...
-              </p>
-            </div>
-          </div>
-        ) : selectedOrder ? (
+        {!loading && selectedOrder ? (
           <>
             {/* Show payment view if payment is pending and user clicked complete */}
             {showPaymentView && selectedOrder.payment_status === 'Pending' ? (

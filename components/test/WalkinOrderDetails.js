@@ -468,6 +468,8 @@ export default function WalkinOrderDetails({
     localStorage.setItem(`${orderTypePrefix}_modifying_order`, order.id)
     localStorage.setItem(`${orderTypePrefix}_modifying_order_number`, order.order_number)
     localStorage.setItem(`${orderTypePrefix}_original_state`, JSON.stringify(orderData.originalState))
+    // Save original order status so editing doesn't revert it back to Pending
+    localStorage.setItem(`${orderTypePrefix}_original_order_status`, order.order_status || 'Pending')
     // 🆕 Save original payment information for modified order payment calculation
     localStorage.setItem(`${orderTypePrefix}_original_payment_status`, order.payment_status || 'Pending')
     localStorage.setItem(`${orderTypePrefix}_original_amount_paid`, (order.amount_paid || order.total_amount || 0).toString())

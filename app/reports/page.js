@@ -1637,11 +1637,7 @@ const calculateProfitData = (salesDataParam, expenseDataParam) => {
 
         {/* Main Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-600 border-t-transparent"></div>
-            </div>
-          ) : (
+          {!loading && (
             <>
               {/* Overview Tab */}
               {activeReportTab === 'overview' && (

@@ -754,11 +754,7 @@ export default function ExpensesPage() {
 
         {/* Expenses List */}
         <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-32">
-              <div className="animate-spin rounded-full h-6 w-6 border-2 border-purple-600 border-t-transparent"></div>
-            </div>
-          ) : filteredExpenses.length === 0 ? (
+          {!loading && filteredExpenses.length === 0 ? (
             <div className="text-center py-12 px-4">
               <Receipt className={`w-12 h-12 ${themeClasses.textSecondary} mx-auto mb-3`} />
               <h3 className={`text-lg font-semibold ${themeClasses.textSecondary} mb-2`}>No expenses found</h3>

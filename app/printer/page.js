@@ -916,15 +916,7 @@ const autoDiscoverPrinters = async () => {
   const isDark = themeManager.isDark()
 
   if (isLoading) {
-    return (
-      <div className={`h-screen flex items-center justify-center ${classes.background}`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-600 border-t-transparent mx-auto mb-4"></div>
-          <h3 className={`text-xl font-bold ${classes.textPrimary} mb-2`}>Loading Printers</h3>
-          <p className={classes.textSecondary}>Please wait...</p>
-        </div>
-      </div>
-    )
+    return null
   }
 
   return (

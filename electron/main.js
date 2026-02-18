@@ -35,6 +35,7 @@ const { printKitchenToken } = require('./printing/kitchenTokenPrinter');
 const { registerWhatsAppHandlers } = require('./whatsapp/whatsappHandlers');
 const { registerMarketingHandlers } = require('./marketing/marketingHandlers');
 const { registerAssetHandlers } = require('./handlers/assetHandlers');
+const { registerBackupHandlers } = require('./handlers/backupHandler');
 
 let mainWindow;
 
@@ -223,6 +224,7 @@ app.whenReady().then(() => {
   registerWhatsAppHandlers(ipcMain);
   registerMarketingHandlers(ipcMain);
   registerAssetHandlers(ipcMain);
+  registerBackupHandlers(ipcMain);
 
   // Update check is now manual from Settings > Updates page
   // No automatic check on startup to avoid timing issues

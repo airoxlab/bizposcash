@@ -84,6 +84,16 @@ const api = {
     getCustomers: (userId) => ipcRenderer.invoke('marketing-get-customers', userId)
   },
   
+  // Backup & Recovery (offline-only — auto-saves whenever offline data is cached)
+  backup: {
+    selectFolder: () => ipcRenderer.invoke('backup:select-folder'),
+    initFolder: (folderPath) => ipcRenderer.invoke('backup:init-folder', { folderPath }),
+    autoSave: (data, folderPath) => ipcRenderer.invoke('backup:auto-save', { data, folderPath }),
+    readIndex: (folderPath) => ipcRenderer.invoke('backup:read-index', { folderPath }),
+    loadFile: (filePath) => ipcRenderer.invoke('backup:load-file', { filePath }),
+    defaultPath: () => ipcRenderer.invoke('backup:default-path'),
+  },
+
   platform: process.platform,
   isElectron: true
 };

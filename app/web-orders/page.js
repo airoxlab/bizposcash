@@ -709,17 +709,20 @@ function WebOrdersPage() {
           const timestamp = new Date().toISOString();
           console.log(`🔔 [Web Orders Page] ${timestamp} - Realtime event:`, payload.eventType, payload);
 
-          // Check if it's a website order for INSERT events
-          if (payload.eventType === "INSERT" && payload.new?.original_order_source === "Website") {
-            console.log("🌐 [Web Orders Page] ✅ New website order inserted:", payload.new.order_number);
+          // Check if it's a website or mobile app order for INSERT events
+          if (payload.eventType === "INSERT" &&
+              (payload.new?.original_order_source === "Website" ||
+               payload.new?.original_order_source === "Mobile App")) {
+            console.log("🌐 [Web Orders Page] ✅ New web/mobile order inserted:", payload.new.order_number);
             console.log("🔄 [Web Orders Page] Refreshing orders list...");
 
             // Play beep sound and show toast only for pending orders
             if (payload.new?.is_approved === false) {
               webOrderNotificationManager.playBeepSound();
 
+              const sourceLabel = payload.new?.original_order_source === "Mobile App" ? "Mobile App" : "Web";
               notify.success(
-                `🌐 New Web Order: ${payload.new.order_number}`,
+                `${sourceLabel === "Mobile App" ? "📱" : "🌐"} New ${sourceLabel} Order: ${payload.new.order_number}`,
                 {
                   duration: 8000,
                   description: 'Order received and ready to approve'
@@ -731,18 +734,23 @@ function WebOrdersPage() {
           }
           // Check for UPDATE events (approval/rejection)
           else if (payload.eventType === "UPDATE" &&
-                   (payload.new?.original_order_source === "Website" || payload.old?.original_order_source === "Website")) {
-            console.log("🔄 [Web Orders Page] Website order updated:", payload.new?.order_number);
+                   (payload.new?.original_order_source === "Website" ||
+                    payload.old?.original_order_source === "Website" ||
+                    payload.new?.original_order_source === "Mobile App" ||
+                    payload.old?.original_order_source === "Mobile App")) {
+            console.log("🔄 [Web Orders Page] Web/Mobile order updated:", payload.new?.order_number);
             console.log("🔄 [Web Orders Page] Refreshing orders list...");
             fetchWebOrders();
           }
           // Check for DELETE events
-          else if (payload.eventType === "DELETE" && payload.old?.original_order_source === "Website") {
-            console.log("🗑️ [Web Orders Page] Website order deleted:", payload.old?.order_number);
+          else if (payload.eventType === "DELETE" &&
+                   (payload.old?.original_order_source === "Website" ||
+                    payload.old?.original_order_source === "Mobile App")) {
+            console.log("🗑️ [Web Orders Page] Web/Mobile order deleted:", payload.old?.order_number);
             console.log("🔄 [Web Orders Page] Refreshing orders list...");
             fetchWebOrders();
           } else {
-            console.log("ℹ️ [Web Orders Page] Realtime event but not for website orders:", {
+            console.log("ℹ️ [Web Orders Page] Realtime event but not for web/mobile orders:", {
               eventType: payload.eventType,
               order_number: payload.new?.order_number || payload.old?.order_number,
               original_order_source: payload.new?.original_order_source || payload.old?.original_order_source
@@ -775,7 +783,7 @@ function WebOrdersPage() {
         return;
       }
 
-      console.log("🔍 [Web Orders] Fetching website orders with filter:", statusFilter);
+      console.log("🔍 [Web Orders] Fetching web/mobile orders with filter:", statusFilter);
 
       let query = supabase
         .from("orders")
@@ -794,7 +802,7 @@ function WebOrdersPage() {
           )
         `)
         .eq("user_id", user.id)
-        .eq("original_order_source", "Website");
+        .in("original_order_source", ["Website", "Mobile App"]);
 
       // Apply status filter
       if (statusFilter === "Pending") {
@@ -1206,7 +1214,7 @@ function WebOrdersPage() {
                     Web Orders
                   </h1>
                   <p className={`text-sm ${themeClasses.textSecondary}`}>
-                    Pending website orders for approval
+                    Orders from website and mobile app
                   </p>
                 </div>
               </div>
@@ -1271,12 +1279,12 @@ function WebOrdersPage() {
                 <Globe className={`w-10 h-10 ${themeClasses.textSecondary}`} />
               </div>
               <h3 className={`text-xl font-bold ${themeClasses.text} mb-2`}>
-                No Pending Web Orders
+                No Orders Found
               </h3>
               <p className={themeClasses.textSecondary}>
                 {searchTerm
                   ? "No orders match your search"
-                  : "All website orders have been processed"}
+                  : "All web and mobile orders have been processed"}
               </p>
             </div>
           ) : (

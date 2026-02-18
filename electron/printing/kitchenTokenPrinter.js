@@ -85,92 +85,53 @@ async function printKitchenToken(ip, port, orderData, userProfile) {
 
       if (orderData.items && orderData.items.length > 0) {
         for (const item of orderData.items) {
-          // Determine if item was added or removed
-          const isAdded = item.changeType === 'added';
-          const isRemoved = item.changeType === 'removed';
+          const ct = item.changeType;
 
           if (item.isDeal) {
             let itemName = item.name;
-
-            // Add prefix for added/removed items
-            if (isAdded) {
-              itemName = '+ ' + itemName; // '+' prefix for added
-            } else if (isRemoved) {
-              itemName = '- ' + itemName; // '-' prefix for removed
-            }
-
             const maxNameLength = PAPER_WIDTH - 4;
-            if (itemName.length > maxNameLength) {
-              itemName = itemName.substring(0, maxNameLength);
-            }
+            if (itemName.length > maxNameLength) itemName = itemName.substring(0, maxNameLength);
 
-            await printer.bold(true);
-            await printer.leftRight(itemName, item.quantity.toString());
-            await printer.bold(false);
-
-            // Print ADDED/REMOVED label
-            if (isAdded) {
-              await printer.alignLeft();
-              await printer.println("  [ADDED]");
-            } else if (isRemoved) {
-              await printer.alignLeft();
-              await printer.println("  [REMOVED]");
+            await printer.alignLeft();
+            if (ct === 'modified') {
+              await printer.leftRight(itemName, `Before: ${item.oldQuantity}`);
+              await printer.leftRight('', `After:  ${item.newQuantity}`);
+            } else if (ct === 'added') {
+              await printer.leftRight(`+ ${itemName}`, item.quantity.toString());
+            } else if (ct === 'removed') {
+              await printer.leftRight(`- ${itemName}`, item.quantity.toString());
+            } else {
+              await printer.leftRight(itemName, item.quantity.toString());
             }
 
             if (item.dealProducts && item.dealProducts.length > 0) {
               await printer.alignLeft();
               for (const product of item.dealProducts) {
-                // Check for variant or flavor
                 const variantName = product.variant ||
                   (product.flavor ?
                     (typeof product.flavor === 'object' ? (product.flavor.flavor_name || product.flavor.name) : product.flavor)
                     : null);
                 let productLine = `  ${product.quantity}x ${product.name}`;
-                if (variantName) {
-                  productLine += ` - ${variantName}`;
-                }
+                if (variantName) productLine += ` - ${variantName}`;
                 await printer.println(productLine);
               }
             }
-
-            if (item.notes) {
-              await printer.alignLeft();
-              await printer.println(`  ** ${item.notes} **`);
-            }
           } else {
             let itemName = item.name;
-            if (item.size) {
-              itemName = `${item.name} (${item.size})`;
-            }
-
-            // Add prefix for added/removed items
-            if (isAdded) {
-              itemName = '+ ' + itemName; // '+' prefix for added
-            } else if (isRemoved) {
-              itemName = '- ' + itemName; // '-' prefix for removed
-            }
-
+            if (item.size) itemName = `${item.name} (${item.size})`;
             const maxNameLength = PAPER_WIDTH - 4;
-            if (itemName.length > maxNameLength) {
-              itemName = itemName.substring(0, maxNameLength);
-            }
+            if (itemName.length > maxNameLength) itemName = itemName.substring(0, maxNameLength);
 
-            await printer.bold(true);
-            await printer.leftRight(itemName, item.quantity.toString());
-            await printer.bold(false);
-
-            // Print ADDED/REMOVED label
-            if (isAdded) {
-              await printer.alignLeft();
-              await printer.println("  [ADDED]");
-            } else if (isRemoved) {
-              await printer.alignLeft();
-              await printer.println("  [REMOVED]");
-            }
-
-            if (item.notes) {
-              await printer.alignLeft();
-              await printer.println(`  ** ${item.notes} **`);
+            await printer.alignLeft();
+            if (ct === 'modified') {
+              await printer.leftRight(itemName, `Before: ${item.oldQuantity}`);
+              await printer.leftRight('', `After:  ${item.newQuantity}`);
+            } else if (ct === 'added') {
+              await printer.leftRight(`+ ${itemName}`, item.quantity.toString());
+            } else if (ct === 'removed') {
+              await printer.leftRight(`- ${itemName}`, item.quantity.toString());
+            } else {
+              await printer.leftRight(itemName, item.quantity.toString());
             }
           }
         }

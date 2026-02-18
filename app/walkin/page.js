@@ -2269,6 +2269,7 @@ export default function WalkInPage() {
     localStorage.removeItem('walkin_modifying_order')
     localStorage.removeItem('walkin_modifying_order_number')
     localStorage.removeItem('walkin_original_state')
+    localStorage.removeItem('walkin_original_order_status')
   }
 
   const handleConfirmExit = () => {
@@ -2311,6 +2312,9 @@ export default function WalkInPage() {
       originalPaymentStatus: localStorage.getItem('walkin_original_payment_status'),
       originalAmountPaid: parseFloat(localStorage.getItem('walkin_original_amount_paid')) || 0,
       originalPaymentMethod: localStorage.getItem('walkin_original_payment_method'),
+      // Preserve original order status so editing doesn't revert it back to Pending
+      // WalkinOrderDetails.js saves this as `walkin_original_order_status` when reopening
+      originalOrderStatus: localStorage.getItem('walkin_original_order_status') || null,
       tableId: selectedTable?.id || null,
       tableName: selectedTable?.table_name || selectedTable?.table_number || null
     }
@@ -2404,22 +2408,7 @@ export default function WalkInPage() {
   const isDark = themeManager.isDark()
 
   if (isLoading || !isDataReady) {
-    return (
-      <div className={`h-screen flex items-center justify-center ${classes.background} transition-all duration-500`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-green-600 border-t-transparent mx-auto mb-4"></div>
-          <h3 className={`text-xl font-bold ${classes.textPrimary} mb-2`}>Loading Menu Data</h3>
-          <p className={`${classes.textSecondary} mb-4`}>Please wait while we load your products and deals...</p>
-
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    )
+    return null
   }
 
   return (

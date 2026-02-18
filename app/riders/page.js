@@ -488,12 +488,7 @@ export default function RidersOrdersPage() {
 
             {/* Orders List */}
             <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                <div className="p-4 text-center">
-                  <div className="animate-spin w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full mx-auto"></div>
-                  <p className={`mt-2 text-sm ${classes.textSecondary}`}>Loading orders...</p>
-                </div>
-              ) : filteredOrders.length === 0 ? (
+              {!loading && filteredOrders.length === 0 ? (
                 <div className="p-8 text-center">
                   <Package className={`w-12 h-12 ${classes.textSecondary} mx-auto mb-3`} />
                   <p className={`${classes.textSecondary}`}>No delivery orders found</p>

@@ -150,15 +150,7 @@ export default function LoginPage() {
   }
 
   if (isCheckingAuth) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          className="w-12 h-12 border-4 border-white border-t-transparent rounded-full"
-        />
-      </div>
-    )
+    return null
   }
 
   return (

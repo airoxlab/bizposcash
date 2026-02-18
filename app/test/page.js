@@ -505,22 +505,7 @@ export default function TestPage() {
   const isDark = themeManager.isDark()
 
   if (isLoading || !isDataReady) {
-    return (
-      <div className={`h-screen flex items-center justify-center ${classes.background} transition-all duration-500`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-600 border-t-transparent mx-auto mb-4"></div>
-          <h3 className={`text-xl font-bold ${classes.textPrimary} mb-2`}>Loading Menu Data</h3>
-          <p className={`${classes.textSecondary} mb-4`}>Please wait while we load your products and deals...</p>
-
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    )
+    return null
   }
 
   return (

@@ -48,6 +48,7 @@ import { cacheManager } from '../../lib/cacheManager'
 import { printerManager } from '../../lib/printerManager'
 import dailySerialManager from '../../lib/utils/dailySerialManager'
 import { getTodaysBusinessDate, filterOrdersByBusinessDate, getBusinessDayRange } from '../../lib/utils/businessDayUtils'
+import { getOrderChanges, getOrderItemsWithChanges } from '../../lib/utils/orderChangesTracker'
 import ConfirmModal from '../../components/ui/ConfirmModal'
 import NotificationSystem, { notify } from '../../components/ui/NotificationSystem'
 import ProtectedPage from '../../components/ProtectedPage'
@@ -70,11 +71,29 @@ export default function KDSPage() {
   const [viewMode, setViewMode] = useState('columns') // 'tabs' or 'columns'
   const [allOrders, setAllOrders] = useState([]) // Store all orders for column view
   const [sortOrder, setSortOrder] = useState('desc') // 'asc' (old to new) or 'desc' (new to old)
+  const [updatedOrderIds, setUpdatedOrderIds] = useState(new Set()) // Orders updated while in kitchen
+  const [selectedOrderChanges, setSelectedOrderChanges] = useState(null) // Changes for selected order modal
   const [confirmCancel, setConfirmCancel] = useState({ show: false, orderId: null })
   const [isCancelling, setIsCancelling] = useState(false)
+  const [mounted, setMounted] = useState(false) // Tracks client-side hydration completion
   const audioRef = useRef(null)
   const refreshTimerRef = useRef(null)
   const lastOrderCountRef = useRef(0)
+  const allOrdersRef = useRef([]) // Ref to always hold current orders for real-time comparison
+
+  // Helpers to persist "UPDATED" order IDs across re-renders / page refreshes
+  const getStoredUpdatedIds = () => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('kds_updated_orders') || '[]'))
+    } catch {
+      return new Set()
+    }
+  }
+  const saveUpdatedIds = (ids) => {
+    try {
+      localStorage.setItem('kds_updated_orders', JSON.stringify([...ids]))
+    } catch {}
+  }
 
   // Status tabs matching orders page
   const statusTabs = [
@@ -147,6 +166,9 @@ export default function KDSPage() {
     }
   }
 
+  // Mark component as hydrated so theme-dependent classes are safe to use
+  useEffect(() => { setMounted(true) }, [])
+
   useEffect(() => {
     if (!authManager.isLoggedIn()) {
       router.push('/')
@@ -197,6 +219,31 @@ export default function KDSPage() {
           if (payload.eventType === 'INSERT' && soundEnabled) {
             playNotificationSound()
           }
+
+          // Updated order detection is handled inside loadOrders() by comparing
+          // freshly fetched orders against allOrdersRef (the previous snapshot)
+        }
+      )
+      .subscribe()
+
+    // Subscribe to order_items INSERT events — these fire AFTER new items are saved,
+    // which is the right moment to detect that an existing kitchen order was edited.
+    const itemsSubscription = supabase
+      .channel('kds-order-items')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'order_items' },
+        (payload) => {
+          const orderId = payload.new?.order_id
+          if (!orderId) return
+          // If this order is already in a kitchen status → it was edited, not newly placed
+          const existingOrder = allOrdersRef.current.find(o => o.id === orderId)
+          if (existingOrder && ['Preparing', 'Ready'].includes(existingOrder.order_status)) {
+            const stored = getStoredUpdatedIds()
+            stored.add(orderId)
+            saveUpdatedIds(stored)
+            setUpdatedOrderIds(new Set(stored))
+          }
         }
       )
       .subscribe()
@@ -206,6 +253,7 @@ export default function KDSPage() {
         clearInterval(refreshTimer)
       }
       subscription.unsubscribe()
+      itemsSubscription.unsubscribe()
     }
   }, [router, autoRefresh, refreshInterval])
 
@@ -271,6 +319,7 @@ export default function KDSPage() {
               order_instructions,
               delivery_charges,
               cashier_id,
+              updated_at,
               order_items (
                 id,
                 product_name,
@@ -316,11 +365,18 @@ export default function KDSPage() {
           console.log('📦 [KDS] Loaded from cache (network error):', fetchedOrders.length)
         }
       } else {
-        // Offline mode - get orders from cache
+        // Offline mode - get orders from cache using the SAME time-range as the online query.
+        // Using filterOrdersByBusinessDate here would cause a mismatch: its getBusinessDate()
+        // assigns 3am-10am "gap" orders to the current business date, but the online range
+        // starts at 10am — so those orders would appear offline but not online.
         console.log('📴 [KDS] Offline mode - loading from cache')
         const cachedOrders = cacheManager.getAllOrders() || []
-        // Filter for today's business day orders
-        fetchedOrders = filterOrdersByBusinessDate(cachedOrders, todaysBusinessDate, businessStartTime, businessEndTime)
+        const rangeStart = new Date(businessDayRange.startDateTime)
+        const rangeEnd = new Date(businessDayRange.endDateTime)
+        fetchedOrders = cachedOrders.filter(o => {
+          const t = new Date(o.created_at)
+          return t >= rangeStart && t < rangeEnd
+        })
         console.log('📦 [KDS] Loaded from cache:', fetchedOrders.length)
       }
 
@@ -335,8 +391,32 @@ export default function KDSPage() {
       // Enrich orders with daily serial numbers
       const ordersWithSerials = cacheManager.enrichOrdersWithSerials(fetchedOrders)
 
-      // Store all orders
+      // Store all orders (also keep ref in sync for real-time comparison)
+      allOrdersRef.current = ordersWithSerials
       setAllOrders(ordersWithSerials)
+
+      // Restore UPDATED tags from localStorage, keeping only IDs still in a kitchen status
+      const storedIds = getStoredUpdatedIds()
+
+      // Also seed from order_changes cache — catches orders modified before KDS was opened
+      try {
+        const cachedChanges = JSON.parse(localStorage.getItem('order_changes') || '{}')
+        ordersWithSerials
+          .filter(o => ['Preparing', 'Ready'].includes(o.order_status))
+          .forEach(o => {
+            const changes = cachedChanges[o.id]
+            if (changes && changes.length > 0) storedIds.add(o.id)
+          })
+      } catch (_) {}
+
+      const validIds = new Set(
+        [...storedIds].filter(id =>
+          ordersWithSerials.some(o => o.id === id && ['Preparing', 'Ready'].includes(o.order_status))
+        )
+      )
+      saveUpdatedIds(validIds) // prune stale IDs
+      setUpdatedOrderIds(validIds)
+
       setLoading(false)
     } catch (error) {
       console.error('Error loading KDS orders:', error)
@@ -359,10 +439,12 @@ export default function KDSPage() {
         const todaysBusinessDate = getTodaysBusinessDate(businessStartTime, businessEndTime)
         const cachedOrders = cacheManager.getAllOrders() || []
         const todayOrders = filterOrdersByBusinessDate(cachedOrders, todaysBusinessDate, businessStartTime, businessEndTime)
+        allOrdersRef.current = todayOrders
         setAllOrders(todayOrders)
         console.log('📦 [KDS] Final fallback - loaded from cache:', todayOrders.length)
       } catch (cacheError) {
         console.error('Cache fallback also failed:', cacheError)
+        allOrdersRef.current = []
         setAllOrders([])
       }
       setLoading(false)
@@ -492,6 +574,23 @@ export default function KDSPage() {
       const cachedOrder = allOrders.find(o => o.id === orderId)
       setOrderItems(cachedOrder?.order_items || cachedOrder?.items || [])
     }
+
+    // Also fetch order changes (for updated orders) and clear the updated badge
+    try {
+      const changes = await getOrderChanges(orderId)
+      setSelectedOrderChanges(changes.hasChanges ? changes : null)
+      // Clear updated badge from both state and localStorage once staff opens the order
+      const stored = getStoredUpdatedIds()
+      stored.delete(orderId)
+      saveUpdatedIds(stored)
+      setUpdatedOrderIds(prev => {
+        const next = new Set(prev)
+        next.delete(orderId)
+        return next
+      })
+    } catch (e) {
+      setSelectedOrderChanges(null)
+    }
   }
 
   const updateOrderStatus = async (orderId, newStatus) => {
@@ -531,11 +630,10 @@ export default function KDSPage() {
       // Show success message
       playNotificationSound()
 
-      // Close detail view if order is dispatched/cancelled
-      if (newStatus === 'Dispatched' || newStatus === 'Cancelled') {
-        setSelectedOrder(null)
-        setOrderItems([])
-      }
+      // Always close the detail popup after any status action
+      setSelectedOrder(null)
+      setOrderItems([])
+      setSelectedOrderChanges(null)
     } catch (error) {
       console.error('Error updating order status:', error)
       notify.error('Failed to update order status')
@@ -661,6 +759,38 @@ export default function KDSPage() {
       let orderItems = order.order_items || []
 
       // Prepare order data for kitchen token - must match expected format
+      let mappedItems = orderItems.map((item) => {
+        if (item.is_deal) {
+          let dealProducts = []
+          try {
+            if (item.deal_products) {
+              dealProducts = typeof item.deal_products === 'string'
+                ? JSON.parse(item.deal_products)
+                : item.deal_products
+            }
+          } catch (e) {
+            console.error('Failed to parse deal_products:', e)
+          }
+          return {
+            isDeal: true,
+            name: item.product_name || item.deal_name,
+            quantity: item.quantity,
+            dealProducts: dealProducts,
+          }
+        }
+        return {
+          isDeal: false,
+          name: item.product_name || item.deal_name,
+          size: item.variant_name || '',
+          quantity: item.quantity,
+        }
+      })
+
+      // Enrich items with change tracking (changeType, oldQuantity, newQuantity)
+      if (order.id) {
+        mappedItems = await getOrderItemsWithChanges(order.id, mappedItems)
+      }
+
       const orderData = {
         orderNumber: order.order_number,
         orderType: order.order_type || 'walkin',
@@ -671,32 +801,7 @@ export default function KDSPage() {
         deliveryCharges: order.delivery_charges || 0,
         discountAmount: order.discount_amount || 0,
         specialNotes: order.order_instructions || '',
-        items: orderItems.map((item) => {
-          if (item.is_deal) {
-            let dealProducts = []
-            try {
-              if (item.deal_products) {
-                dealProducts = typeof item.deal_products === 'string'
-                  ? JSON.parse(item.deal_products)
-                  : item.deal_products
-              }
-            } catch (e) {
-              console.error('Failed to parse deal_products:', e)
-            }
-            return {
-              isDeal: true,
-              name: item.product_name || item.deal_name,
-              quantity: item.quantity,
-              dealProducts: dealProducts,
-            }
-          }
-          return {
-            isDeal: false,
-            name: item.product_name || item.deal_name,
-            size: item.variant_name || '',
-            quantity: item.quantity,
-          }
-        }),
+        items: mappedItems,
       }
 
       // Get user profile
@@ -743,15 +848,29 @@ export default function KDSPage() {
     const config = getStatusConfig(order.order_status)
     const OrderIcon = getOrderTypeIcon(order.order_type)
     const elapsed = getElapsedTime(order.created_at)
+    const isUpdated = updatedOrderIds.has(order.id)
 
     return (
       <div
-        className={`p-2.5 rounded-lg cursor-pointer ${classes.border} border ${classes.card} hover:shadow-md`}
+        className={`p-2.5 rounded-lg cursor-pointer border hover:shadow-md relative overflow-hidden ${
+          isUpdated
+            ? `${isDark ? 'border-orange-500 bg-orange-900/20' : 'border-orange-400 bg-orange-50'}`
+            : `${classes.border} ${classes.card}`
+        }`}
         onClick={() => {
           setSelectedOrder(order)
           fetchOrderItems(order.id)
         }}
       >
+        {/* UPDATED corner ribbon */}
+        {isUpdated && (
+          <div className="absolute top-0 right-0 z-10">
+            <div className="bg-orange-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg shadow-md animate-pulse tracking-wide">
+              UPDATED
+            </div>
+          </div>
+        )}
+
         {/* Compact Header Row */}
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-2">
@@ -763,7 +882,7 @@ export default function KDSPage() {
             </span>
             <span className={`text-xs px-1.5 py-0.5 rounded ${config.badge}`}>{order.order_status}</span>
           </div>
-          <span className={`text-xs ${classes.textSecondary}`}>{elapsed}</span>
+          <span className={`text-xs ${classes.textSecondary} ${isUpdated ? 'pr-10' : ''}`}>{elapsed}</span>
         </div>
 
         {/* Customer & Table Row */}
@@ -785,15 +904,42 @@ export default function KDSPage() {
         {order.order_items && order.order_items.length > 0 && (
           <div className={`p-2 rounded ${isDark ? 'bg-gray-800/50' : 'bg-gray-100'} mb-2`}>
             <div className="space-y-1">
-              {order.order_items.slice(0, 6).map((item, index) => (
-                <div key={index} className={`text-xs ${classes.textPrimary} flex items-start`}>
-                  <span className="font-bold text-green-600 dark:text-green-400 w-6 flex-shrink-0">{item.quantity}x</span>
-                  <span className="flex-1">
-                    {item.product_name || item.deal_name}
-                    {item.variant_name && <span className={`${classes.textSecondary} text-[10px]`}> ({item.variant_name})</span>}
-                  </span>
-                </div>
-              ))}
+              {order.order_items.slice(0, 6).map((item, index) => {
+                let dealProducts = []
+                if (item.is_deal && item.deal_products) {
+                  try {
+                    dealProducts = typeof item.deal_products === 'string'
+                      ? JSON.parse(item.deal_products)
+                      : item.deal_products
+                  } catch (e) {}
+                }
+                return (
+                  <div key={index}>
+                    <div className={`text-xs ${classes.textPrimary} flex items-start`}>
+                      <span className="font-bold text-green-600 dark:text-green-400 w-6 flex-shrink-0">{item.quantity}x</span>
+                      <span className="flex-1">
+                        {item.product_name || item.deal_name}
+                        {item.is_deal && (
+                          <span className={`ml-1 text-[9px] px-1 py-0.5 rounded ${isDark ? 'bg-purple-900/60 text-purple-300' : 'bg-purple-100 text-purple-600'}`}>Deal</span>
+                        )}
+                        {!item.is_deal && item.variant_name && (
+                          <span className={`${classes.textSecondary} text-[10px]`}> ({item.variant_name})</span>
+                        )}
+                      </span>
+                    </div>
+                    {item.is_deal && dealProducts.length > 0 && (
+                      <div className={`ml-6 mt-0.5 pl-1.5 border-l-2 ${isDark ? 'border-purple-700' : 'border-purple-300'} space-y-0.5`}>
+                        {dealProducts.map((dp, dpIndex) => (
+                          <div key={dpIndex} className={`text-[10px] ${classes.textSecondary} flex gap-1`}>
+                            <span className="font-medium">{dp.quantity}x {dp.name}</span>
+                            {dp.variant && <span>— {dp.variant}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
               {order.order_items.length > 6 && (
                 <div className={`text-xs ${classes.textSecondary} italic pl-6`}>+{order.order_items.length - 6} more items</div>
               )}
@@ -831,7 +977,7 @@ export default function KDSPage() {
   }
 
   // Status Column Component for Column View
-  const StatusColumn = ({ title, icon: Icon, status, orders, config, onOrderClick, onStatusUpdate, onPrintDocket, classes, isDark }) => {
+  const StatusColumn = ({ title, icon: Icon, status, orders, config, onOrderClick, onStatusUpdate, onPrintDocket, classes, isDark, updatedIds }) => {
     return (
       <div className={`flex flex-col h-full rounded-xl ${classes.card} ${classes.border} border overflow-hidden`}>
         {/* Column Header */}
@@ -853,18 +999,33 @@ export default function KDSPage() {
               <p className={`text-sm ${classes.textSecondary}`}>No orders</p>
             </div>
           ) : (
-            orders.map((order) => (
+            orders.map((order) => {
+              const isUpdated = updatedIds && updatedIds.has(order.id)
+              return (
               <div
                 key={order.id}
-                className={`p-2 rounded-lg cursor-pointer ${config.bg} ${config.border} border hover:shadow-md`}
+                className={`p-2 rounded-lg cursor-pointer border hover:shadow-md relative overflow-hidden ${
+                  isUpdated
+                    ? (isDark ? 'border-orange-500 bg-orange-900/20' : 'border-orange-400 bg-orange-50')
+                    : `${config.bg} ${config.border}`
+                }`}
                 onClick={() => onOrderClick(order)}
               >
+                {/* UPDATED corner ribbon */}
+                {isUpdated && (
+                  <div className="absolute top-0 right-0 z-10">
+                    <div className="bg-orange-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-bl-lg shadow-md animate-pulse tracking-wide">
+                      UPDATED
+                    </div>
+                  </div>
+                )}
+
                 {/* Compact Header */}
                 <div className="flex items-center justify-between mb-1">
                   <span className={`font-bold text-sm ${classes.textPrimary}`}>
                     {order.daily_serial ? `${dailySerialManager.formatSerial(order.daily_serial)} ` : ''}#{order.order_number}
                   </span>
-                  <span className={`text-[10px] ${classes.textSecondary}`}>{getElapsedTime(order.created_at)}</span>
+                  <span className={`text-[10px] ${classes.textSecondary} ${isUpdated ? 'pr-10' : ''}`}>{getElapsedTime(order.created_at)}</span>
                 </div>
 
                 {/* Customer & Table in one line */}
@@ -881,12 +1042,39 @@ export default function KDSPage() {
                 {order.order_items && order.order_items.length > 0 && (
                   <div className={`p-1.5 rounded ${isDark ? 'bg-gray-900/30' : 'bg-white/50'} mb-1.5`}>
                     <div className="space-y-0.5">
-                      {order.order_items.slice(0, 5).map((item, index) => (
-                        <div key={index} className={`text-xs ${classes.textPrimary} flex items-start`}>
-                          <span className="font-bold text-green-600 dark:text-green-400 w-5 flex-shrink-0">{item.quantity}x</span>
-                          <span className="truncate">{item.product_name || item.deal_name}</span>
-                        </div>
-                      ))}
+                      {order.order_items.slice(0, 5).map((item, index) => {
+                        let dealProducts = []
+                        if (item.is_deal && item.deal_products) {
+                          try {
+                            dealProducts = typeof item.deal_products === 'string'
+                              ? JSON.parse(item.deal_products)
+                              : item.deal_products
+                          } catch (e) {}
+                        }
+                        return (
+                          <div key={index}>
+                            <div className={`text-xs ${classes.textPrimary} flex items-start`}>
+                              <span className="font-bold text-green-600 dark:text-green-400 w-5 flex-shrink-0">{item.quantity}x</span>
+                              <span className="truncate flex-1">
+                                {item.product_name || item.deal_name}
+                                {!item.is_deal && item.variant_name && (
+                                  <span className={`${classes.textSecondary} text-[9px]`}> ({item.variant_name})</span>
+                                )}
+                              </span>
+                            </div>
+                            {item.is_deal && dealProducts.length > 0 && (
+                              <div className={`ml-5 pl-1 border-l-2 ${isDark ? 'border-purple-700' : 'border-purple-300'} space-y-0.5`}>
+                                {dealProducts.map((dp, dpIndex) => (
+                                  <div key={dpIndex} className={`text-[9px] ${classes.textSecondary} flex gap-1`}>
+                                    <span>{dp.quantity}x {dp.name}</span>
+                                    {dp.variant && <span>— {dp.variant}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                       {order.order_items.length > 5 && (
                         <div className={`text-xs ${classes.textSecondary} italic pl-5`}>+{order.order_items.length - 5} more items</div>
                       )}
@@ -920,7 +1108,7 @@ export default function KDSPage() {
                   )}
                 </div>
               </div>
-            ))
+            )})
           )}
         </div>
       </div>
@@ -928,14 +1116,7 @@ export default function KDSPage() {
   }
 
   if (loading) {
-    return (
-      <div className={`h-screen flex items-center justify-center ${classes.background}`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-600 border-t-transparent mx-auto mb-4"></div>
-          <h3 className={`text-xl font-bold ${classes.textPrimary}`}>Loading Kitchen Display...</h3>
-        </div>
-      </div>
-    )
+    return null
   }
 
   return (
@@ -1097,6 +1278,7 @@ export default function KDSPage() {
               onPrintDocket={printDocket}
               classes={classes}
               isDark={isDark}
+              updatedIds={updatedOrderIds}
             />
 
             {/* Preparing Column */}
@@ -1114,6 +1296,7 @@ export default function KDSPage() {
               onPrintDocket={printDocket}
               classes={classes}
               isDark={isDark}
+              updatedIds={updatedOrderIds}
             />
 
             {/* Ready Column */}
@@ -1131,6 +1314,7 @@ export default function KDSPage() {
               onPrintDocket={printDocket}
               classes={classes}
               isDark={isDark}
+              updatedIds={updatedOrderIds}
             />
 
             {/* Dispatched Column */}
@@ -1148,6 +1332,7 @@ export default function KDSPage() {
               onPrintDocket={printDocket}
               classes={classes}
               isDark={isDark}
+              updatedIds={updatedOrderIds}
             />
           </div>
         </div>
@@ -1160,19 +1345,27 @@ export default function KDSPage() {
           onClick={() => {
             setSelectedOrder(null)
             setOrderItems([])
+            setSelectedOrderChanges(null)
           }}
         >
           <div
-            className={`${classes.card} rounded-2xl ${classes.border} border-2 max-w-2xl w-full max-h-[80vh] overflow-y-auto`}
+            className={`${classes.card} rounded-2xl ${classes.border} border-2 max-w-2xl w-full max-h-[95vh] overflow-y-auto`}
             onClick={(e) => e.stopPropagation()}
           >
               {/* Modal Header */}
               <div className={`p-6 ${classes.border} border-b`}>
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className={`text-2xl font-bold ${classes.textPrimary}`}>
-                      {selectedOrder.daily_serial ? `${dailySerialManager.formatSerial(selectedOrder.daily_serial)} - ` : ''}Order #{selectedOrder.order_number}
-                    </h2>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h2 className={`text-2xl font-bold ${classes.textPrimary}`}>
+                        {selectedOrder.daily_serial ? `${dailySerialManager.formatSerial(selectedOrder.daily_serial)} - ` : ''}Order #{selectedOrder.order_number}
+                      </h2>
+                      {selectedOrderChanges && selectedOrderChanges.hasChanges && (
+                        <span className="px-2 py-1 rounded-lg text-sm font-bold bg-orange-500 text-white animate-pulse">
+                          ORDER UPDATED
+                        </span>
+                      )}
+                    </div>
                     <p className={`text-sm ${classes.textSecondary}`}>
                       {new Date(selectedOrder.created_at).toLocaleString()}
                     </p>
@@ -1181,6 +1374,7 @@ export default function KDSPage() {
                     onClick={() => {
                       setSelectedOrder(null)
                       setOrderItems([])
+                      setSelectedOrderChanges(null)
                     }}
                     className={`p-2 rounded-lg ${classes.button}`}
                   >
@@ -1221,31 +1415,119 @@ export default function KDSPage() {
                     <div className="col-span-4">Details</div>
                   </div>
                   {/* Table Rows */}
-                  {orderItems.map((item, index) => (
-                    <div
-                      key={index}
-                      className={`grid grid-cols-12 gap-2 px-3 py-2.5 text-sm items-center ${index !== orderItems.length - 1 ? `border-b ${classes.border}` : ''}`}
-                    >
-                      <div className={`col-span-1 font-bold ${classes.textPrimary}`}>
-                        {item.quantity}x
-                      </div>
-                      <div className={`col-span-7 ${classes.textPrimary} font-medium`}>
-                        {item.product_name || item.deal_name}
-                      </div>
-                      <div className={`col-span-4 text-xs ${classes.textSecondary}`}>
-                        {item.variant_name && <span className="block">V: {item.variant_name}</span>}
-                        {item.flavor_name && <span className="block">F: {item.flavor_name}</span>}
-                        {!item.variant_name && !item.flavor_name && <span>-</span>}
-                      </div>
-                      {item.special_instructions && (
-                        <div className={`col-span-12 text-xs mt-1 p-1.5 rounded ${isDark ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'}`}>
-                          <AlertTriangle className="w-3 h-3 inline mr-1" />
-                          {item.special_instructions}
+                  {orderItems.map((item, index) => {
+                    let dealProducts = []
+                    if (item.is_deal && item.deal_products) {
+                      try {
+                        dealProducts = typeof item.deal_products === 'string'
+                          ? JSON.parse(item.deal_products)
+                          : item.deal_products
+                      } catch (e) {
+                        console.error('Failed to parse deal_products:', e)
+                      }
+                    }
+                    return (
+                      <div
+                        key={index}
+                        className={`px-3 py-2.5 text-sm ${index !== orderItems.length - 1 ? `border-b ${classes.border}` : ''}`}
+                      >
+                        {/* Item header row */}
+                        <div className="grid grid-cols-12 gap-2 items-center">
+                          <div className={`col-span-1 font-bold ${classes.textPrimary}`}>
+                            {item.quantity}x
+                          </div>
+                          <div className={`col-span-11 ${classes.textPrimary} font-medium flex items-center gap-2`}>
+                            {item.product_name || item.deal_name}
+                            {item.is_deal && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${isDark ? 'bg-purple-900/60 text-purple-300' : 'bg-purple-100 text-purple-600'}`}>
+                                Deal
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {/* Regular item: variant / flavor */}
+                        {!item.is_deal && (item.variant_name || item.flavor_name) && (
+                          <div className={`pl-8 mt-0.5 text-xs ${classes.textSecondary}`}>
+                            {item.variant_name && <span className="mr-2">Size: {item.variant_name}</span>}
+                            {item.flavor_name && <span>Flavor: {item.flavor_name}</span>}
+                          </div>
+                        )}
+                        {!item.is_deal && !item.variant_name && !item.flavor_name && (
+                          <div className={`pl-8 mt-0.5 text-xs ${classes.textSecondary}`}>-</div>
+                        )}
+
+                        {/* Deal item: expand sub-products with variants */}
+                        {item.is_deal && dealProducts.length > 0 && (
+                          <div className={`mt-1.5 ml-7 pl-2 border-l-2 ${isDark ? 'border-purple-700' : 'border-purple-300'} space-y-1`}>
+                            {dealProducts.map((dp, dpIndex) => (
+                              <div key={dpIndex} className={`text-xs flex items-start gap-1.5 ${classes.textPrimary}`}>
+                                <span className="font-bold text-green-600 dark:text-green-400 w-5 flex-shrink-0">{dp.quantity}x</span>
+                                <span className="flex-1">
+                                  {dp.name}
+                                  {dp.variant && (
+                                    <span className={`${classes.textSecondary} ml-1`}>— {dp.variant}</span>
+                                  )}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {item.is_deal && dealProducts.length === 0 && (
+                          <div className={`pl-8 mt-0.5 text-xs ${classes.textSecondary}`}>No item details</div>
+                        )}
+
+                        {/* Special instructions */}
+                        {item.special_instructions && (
+                          <div className={`text-xs mt-1.5 p-1.5 rounded ${isDark ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'}`}>
+                            <AlertTriangle className="w-3 h-3 inline mr-1" />
+                            {item.special_instructions}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
+
+                {/* Order Changes Section - shown when order was modified in kitchen */}
+                {selectedOrderChanges && selectedOrderChanges.hasChanges && (
+                  <div className={`mt-4 rounded-xl p-4 ${isDark ? 'bg-orange-900/20 border border-orange-700' : 'bg-orange-50 border border-orange-300'}`}>
+                    <h3 className={`text-sm font-bold mb-3 flex items-center gap-2 ${isDark ? 'text-orange-300' : 'text-orange-700'}`}>
+                      <AlertTriangle className="w-4 h-4" />
+                      Order Updated — Changes
+                    </h3>
+                    <div className="space-y-1.5">
+                      {selectedOrderChanges.changes.map((change, idx) => {
+                        const isAdded = change.change_type === 'added'
+                        const isRemoved = change.change_type === 'removed'
+                        const isModified = change.change_type === 'quantity_changed'
+                        return (
+                          <div key={idx} className={`text-xs flex items-start gap-2 ${
+                            isAdded ? (isDark ? 'text-green-300' : 'text-green-700') :
+                            isRemoved ? (isDark ? 'text-red-300' : 'text-red-700') :
+                            (isDark ? 'text-yellow-300' : 'text-yellow-700')
+                          }`}>
+                            <span className="font-bold flex-shrink-0">
+                              {isAdded ? '+ NEW' : isRemoved ? '– REM' : '~ QTY'}
+                            </span>
+                            <span className="flex-1">
+                              {change.product_name}
+                              {change.variant_name && ` (${change.variant_name})`}
+                              {isModified && (
+                                <span className="ml-1">
+                                  — <span className="line-through opacity-60">{change.old_quantity}x</span>
+                                  {' → '}<span className="font-bold">{change.new_quantity}x</span>
+                                </span>
+                              )}
+                              {isAdded && <span className="ml-1 font-bold">{change.new_quantity}x</span>}
+                              {isRemoved && <span className="ml-1 line-through opacity-60">{change.old_quantity}x</span>}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="mt-6 flex space-x-3">

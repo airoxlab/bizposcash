@@ -515,91 +515,53 @@ async function generateKitchenTokenESCPOS(orderData, userProfile) {
 
   if (orderData.items && orderData.items.length > 0) {
     for (const item of orderData.items) {
-      // Determine if item was added or removed
-      const isAdded = item.changeType === 'added';
-      const isRemoved = item.changeType === 'removed';
+      const ct = item.changeType;
 
       if (item.isDeal) {
         let itemName = item.name;
-
-        // Add prefix for added/removed items
-        if (isAdded) {
-          itemName = '+ ' + itemName; // '+' prefix for added
-        } else if (isRemoved) {
-          itemName = '- ' + itemName; // '-' prefix for removed
-        }
-
         const maxNameLength = PAPER_WIDTH - 4;
-        if (itemName.length > maxNameLength) {
-          itemName = itemName.substring(0, maxNameLength);
-        }
+        if (itemName.length > maxNameLength) itemName = itemName.substring(0, maxNameLength);
 
-        commands.push(CMD.BOLD_ON);
-        commands.push(leftRight(itemName, item.quantity.toString()));
-        commands.push(CMD.BOLD_OFF);
-
-        // Print ADDED/REMOVED label
-        if (isAdded) {
-          commands.push(CMD.ALIGN_LEFT);
-          commands.push(leftText('  [ADDED]'));
-        } else if (isRemoved) {
-          commands.push(CMD.ALIGN_LEFT);
-          commands.push(leftText('  [REMOVED]'));
+        commands.push(CMD.ALIGN_LEFT);
+        if (ct === 'modified') {
+          commands.push(leftRight(itemName, `Before: ${item.oldQuantity}`));
+          commands.push(leftRight('', `After:  ${item.newQuantity}`));
+        } else if (ct === 'added') {
+          commands.push(leftRight(`+ ${itemName}`, item.quantity.toString()));
+        } else if (ct === 'removed') {
+          commands.push(leftRight(`- ${itemName}`, item.quantity.toString()));
+        } else {
+          commands.push(leftRight(itemName, item.quantity.toString()));
         }
 
         if (item.dealProducts && item.dealProducts.length > 0) {
           commands.push(CMD.ALIGN_LEFT);
           for (const product of item.dealProducts) {
-            // Check for variant or flavor
             const variantName = product.variant ||
               (product.flavor ?
                 (typeof product.flavor === 'object' ? (product.flavor.flavor_name || product.flavor.name) : product.flavor)
                 : null);
             let productLine = `  ${product.quantity}x ${product.name}`;
-            if (variantName) {
-              productLine += ` - ${variantName}`;
-            }
+            if (variantName) productLine += ` - ${variantName}`;
             commands.push(leftText(productLine));
           }
         }
-
-        if (item.notes) {
-          commands.push(leftText(`  ** ${item.notes} **`));
-        }
       } else {
         let itemName = item.name;
-        if (item.size) {
-          itemName = `${item.name} (${item.size})`;
-        }
-
-        // Add prefix for added/removed items
-        if (isAdded) {
-          itemName = '+ ' + itemName; // '+' prefix for added
-        } else if (isRemoved) {
-          itemName = '- ' + itemName; // '-' prefix for removed
-        }
-
-        // Truncate long names
+        if (item.size) itemName = `${item.name} (${item.size})`;
         const maxNameLength = PAPER_WIDTH - 4;
-        if (itemName.length > maxNameLength) {
-          itemName = itemName.substring(0, maxNameLength);
-        }
+        if (itemName.length > maxNameLength) itemName = itemName.substring(0, maxNameLength);
 
-        commands.push(CMD.BOLD_ON);
-        commands.push(leftRight(itemName, item.quantity.toString()));
-        commands.push(CMD.BOLD_OFF);
-
-        // Print ADDED/REMOVED label
-        if (isAdded) {
-          commands.push(CMD.ALIGN_LEFT);
-          commands.push(leftText('  [ADDED]'));
-        } else if (isRemoved) {
-          commands.push(CMD.ALIGN_LEFT);
-          commands.push(leftText('  [REMOVED]'));
-        }
-
-        if (item.notes) {
-          commands.push(leftText(`  ** ${item.notes} **`));
+        commands.push(CMD.ALIGN_LEFT);
+        if (ct === 'modified') {
+          commands.push(leftRight(itemName, `Before: ${item.oldQuantity}`));
+          commands.push(leftRight('', `After:  ${item.newQuantity}`));
+        } else if (ct === 'added') {
+          commands.push(leftRight(`+ ${itemName}`, item.quantity.toString()));
+        } else if (ct === 'removed') {
+          commands.push(leftRight(`- ${itemName}`, item.quantity.toString()));
+        } else {
+          commands.push(leftRight(itemName, item.quantity.toString()));
         }
       }
     }
