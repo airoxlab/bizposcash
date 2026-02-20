@@ -9,10 +9,20 @@ export const metadata = {
 }
 
 // Inline script to set initial theme class on <html> before React hydrates.
-// This prevents flashes / ensures Tailwind `dark:` variants match on first paint.
+// Reads from in-memory cache → cookie → localStorage → defaults to 'light'.
+// themeManager saves to cookies; this script must match that source.
 const setInitialThemeScript = `(function(){
   try {
-    var theme = (window._themeSettings && window._themeSettings.theme) || localStorage.getItem('theme') || 'light';
+    var theme = (window._themeSettings && window._themeSettings.theme);
+    if (!theme) {
+      var ca = document.cookie.split(';');
+      for (var i = 0; i < ca.length; i++) {
+        var c = ca[i].trim();
+        if (c.indexOf('theme=') === 0) { theme = c.substring(6); break; }
+      }
+    }
+    if (!theme) { theme = localStorage.getItem('theme'); }
+    if (!theme || (theme !== 'dark' && theme !== 'light')) { theme = 'light'; }
     document.documentElement.classList.remove('light','dark');
     document.documentElement.classList.add(theme);
   } catch(e) { /* ignore */ }

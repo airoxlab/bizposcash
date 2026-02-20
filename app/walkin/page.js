@@ -2408,7 +2408,7 @@ export default function WalkInPage() {
   const isDark = themeManager.isDark()
 
   if (isLoading || !isDataReady) {
-    return null
+    return <div className={`h-screen w-screen ${classes.background}`} />
   }
 
   return (
@@ -2542,6 +2542,12 @@ export default function WalkInPage() {
             setCurrentView('products')
           }}
           orderType="walkin"
+          onConvertToDelivery={() => {
+            setOrdersRefreshTrigger(prev => prev + 1)
+            setSelectedOrder(null)
+            setCurrentView('products')
+            notify.success('Order converted to delivery! Check the delivery page.')
+          }}
         />
       )}
 

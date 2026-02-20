@@ -150,7 +150,7 @@ export default function LoginPage() {
   }
 
   if (isCheckingAuth) {
-    return null
+    return <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600" />
   }
 
   return (

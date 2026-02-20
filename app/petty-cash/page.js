@@ -455,7 +455,8 @@ function PettyCashPageContent() {
   }
 
   if (loading) {
-    return null
+    const classes = themeManager.getClasses()
+    return <div className={`h-screen w-screen ${classes.background}`} />
   }
 
   if (!account) {

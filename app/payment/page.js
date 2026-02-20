@@ -1431,7 +1431,7 @@ const handlePrintKitchenToken = async () => {
   const isDark = themeManager.isDark()
 
   if (!orderData) {
-    return null
+    return <div className={`h-screen w-screen ${classes.background}`} />
   }
 if (orderComplete) {
   return (

@@ -52,6 +52,7 @@ import { getOrderChanges, getOrderItemsWithChanges } from '../../lib/utils/order
 import ConfirmModal from '../../components/ui/ConfirmModal'
 import NotificationSystem, { notify } from '../../components/ui/NotificationSystem'
 import ProtectedPage from '../../components/ProtectedPage'
+import ConvertToDeliveryModal from '../../components/delivery/ConvertToDeliveryModal'
 
 export default function KDSPage() {
   const router = useRouter()
@@ -75,6 +76,7 @@ export default function KDSPage() {
   const [selectedOrderChanges, setSelectedOrderChanges] = useState(null) // Changes for selected order modal
   const [confirmCancel, setConfirmCancel] = useState({ show: false, orderId: null })
   const [isCancelling, setIsCancelling] = useState(false)
+  const [showConvertModal, setShowConvertModal] = useState(false)
   const [mounted, setMounted] = useState(false) // Tracks client-side hydration completion
   const audioRef = useRef(null)
   const refreshTimerRef = useRef(null)
@@ -238,7 +240,7 @@ export default function KDSPage() {
           if (!orderId) return
           // If this order is already in a kitchen status → it was edited, not newly placed
           const existingOrder = allOrdersRef.current.find(o => o.id === orderId)
-          if (existingOrder && ['Preparing', 'Ready'].includes(existingOrder.order_status)) {
+          if (existingOrder && ['Pending', 'Preparing', 'Ready'].includes(existingOrder.order_status)) {
             const stored = getStoredUpdatedIds()
             stored.add(orderId)
             saveUpdatedIds(stored)
@@ -402,7 +404,7 @@ export default function KDSPage() {
       try {
         const cachedChanges = JSON.parse(localStorage.getItem('order_changes') || '{}')
         ordersWithSerials
-          .filter(o => ['Preparing', 'Ready'].includes(o.order_status))
+          .filter(o => ['Pending', 'Preparing', 'Ready'].includes(o.order_status))
           .forEach(o => {
             const changes = cachedChanges[o.id]
             if (changes && changes.length > 0) storedIds.add(o.id)
@@ -411,7 +413,7 @@ export default function KDSPage() {
 
       const validIds = new Set(
         [...storedIds].filter(id =>
-          ordersWithSerials.some(o => o.id === id && ['Preparing', 'Ready'].includes(o.order_status))
+          ordersWithSerials.some(o => o.id === id && ['Pending', 'Preparing', 'Ready'].includes(o.order_status))
         )
       )
       saveUpdatedIds(validIds) // prune stale IDs
@@ -575,19 +577,10 @@ export default function KDSPage() {
       setOrderItems(cachedOrder?.order_items || cachedOrder?.items || [])
     }
 
-    // Also fetch order changes (for updated orders) and clear the updated badge
+    // Fetch order changes (for updated orders)
     try {
       const changes = await getOrderChanges(orderId)
       setSelectedOrderChanges(changes.hasChanges ? changes : null)
-      // Clear updated badge from both state and localStorage once staff opens the order
-      const stored = getStoredUpdatedIds()
-      stored.delete(orderId)
-      saveUpdatedIds(stored)
-      setUpdatedOrderIds(prev => {
-        const next = new Set(prev)
-        next.delete(orderId)
-        return next
-      })
     } catch (e) {
       setSelectedOrderChanges(null)
     }
@@ -887,8 +880,11 @@ export default function KDSPage() {
 
         {/* Customer & Table Row */}
         <div className={`flex items-center gap-2 text-xs ${classes.textSecondary} mb-1.5`}>
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getOrderTypeColor(order.order_type)}`}>
+            {order.order_type === 'takeaway' ? 'Takeaway' : order.order_type === 'delivery' ? 'Delivery' : 'Walk-in'}
+          </span>
           <span className={`${classes.textPrimary} font-medium`}>
-            {order.customers?.full_name || 'Walk-in'}
+            {order.customers?.full_name || ''}
           </span>
           {order.order_type === 'walkin' && order.tables && (
             <>
@@ -1030,7 +1026,10 @@ export default function KDSPage() {
 
                 {/* Customer & Table in one line */}
                 <div className={`flex items-center gap-1 text-xs mb-1`}>
-                  <span className={`${classes.textPrimary} font-medium truncate`}>{order.customers?.full_name || 'Walk-in'}</span>
+                  <span className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase ${getOrderTypeColor(order.order_type)}`}>
+                    {order.order_type === 'takeaway' ? 'Takeaway' : order.order_type === 'delivery' ? 'Delivery' : 'Walk-in'}
+                  </span>
+                  <span className={`${classes.textPrimary} font-medium truncate`}>{order.customers?.full_name || ''}</span>
                   {order.order_type === 'walkin' && order.tables && (
                     <span className={`${isDark ? 'text-purple-400' : 'text-purple-600'} text-[10px]`}>
                       • {order.tables.table_name || `T${order.tables.table_number}`}
@@ -1116,7 +1115,7 @@ export default function KDSPage() {
   }
 
   if (loading) {
-    return null
+    return <div className={`h-screen w-screen ${classes.background}`} />
   }
 
   return (
@@ -1530,7 +1529,7 @@ export default function KDSPage() {
                 )}
 
                 {/* Actions */}
-                <div className="mt-6 flex space-x-3">
+                <div className="mt-6 flex flex-wrap gap-3">
                   {/* Print Docket Button - Always show */}
                   <button
                     onClick={() => printDocket(selectedOrder)}
@@ -1543,6 +1542,18 @@ export default function KDSPage() {
                     <Printer className="w-5 h-5 mr-2" />
                     Print Docket
                   </button>
+
+                  {/* Convert to Delivery - walkin/takeaway in Preparing or Ready */}
+                  {['walkin', 'takeaway'].includes(selectedOrder.order_type) &&
+                   ['Preparing', 'Ready'].includes(selectedOrder.order_status) && (
+                    <button
+                      onClick={() => setShowConvertModal(true)}
+                      className="px-6 py-3 rounded-xl font-semibold shadow-lg flex items-center bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white"
+                    >
+                      <Truck className="w-5 h-5 mr-2" />
+                      Convert to Delivery
+                    </button>
+                  )}
 
                   {/* Status Action Button - Only show if there's a next status */}
                   {getStatusConfig(selectedOrder.order_status).nextStatus && (
@@ -1581,6 +1592,30 @@ export default function KDSPage() {
         type="danger"
         isLoading={isCancelling}
       />
+
+      {/* Convert to Delivery Modal */}
+      {selectedOrder && (
+        <ConvertToDeliveryModal
+          isOpen={showConvertModal}
+          onClose={() => setShowConvertModal(false)}
+          order={selectedOrder}
+          onSuccess={() => {
+            const convertedId = selectedOrder.id
+            // Immediately update local state so the card reflects the new type
+            setAllOrders(prev => prev.map(o =>
+              o.id === convertedId ? { ...o, order_type: 'delivery' } : o
+            ))
+            // Close both modals
+            setShowConvertModal(false)
+            setSelectedOrder(null)
+            setOrderItems([])
+            setSelectedOrderChanges(null)
+            notify.success('Order converted to delivery successfully')
+            // Reload from server to fully sync
+            setTimeout(() => loadOrders(true, user?.id), 800)
+          }}
+        />
+      )}
 
       {/* Notification System */}
       <NotificationSystem />

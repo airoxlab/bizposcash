@@ -622,8 +622,9 @@ export default function WalkinOrderDetails({
                 Mark Ready
               </motion.button>
             )}
-            {/* Convert to Delivery button - only show for takeaway orders in Pending status */}
-            {orderType === 'takeaway' && order.order_status === 'Pending' && (
+            {/* Convert to Delivery button - show for walkin/takeaway in Pending, Preparing, Ready */}
+            {['walkin', 'takeaway'].includes(orderType) &&
+             ['Pending', 'Preparing', 'Ready'].includes(order.order_status) && (
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
@@ -1065,6 +1066,7 @@ export default function WalkinOrderDetails({
         onSuccess={() => {
           setShowConvertModal(false)
           onConvertToDelivery?.()
+          onClose?.()
         }}
       />
 

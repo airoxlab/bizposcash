@@ -1941,7 +1941,8 @@ export default function DeliveryPage() {
       // 🆕 Include original payment information for modified order payment calculation
       originalPaymentStatus: localStorage.getItem('delivery_original_payment_status'),
       originalAmountPaid: parseFloat(localStorage.getItem('delivery_original_amount_paid')) || 0,
-      originalPaymentMethod: localStorage.getItem('delivery_original_payment_method')
+      originalPaymentMethod: localStorage.getItem('delivery_original_payment_method'),
+      originalOrderStatus: localStorage.getItem('delivery_original_order_status') || null
     }
 
     console.log('🔵 [Delivery] Order data prepared:', orderData)
@@ -2027,7 +2028,7 @@ export default function DeliveryPage() {
   const isDark = themeManager.isDark()
 
   if (isLoading || !isDataReady) {
-    return null
+    return <div className={`h-screen w-screen ${classes.background}`} />
   }
 
   return (

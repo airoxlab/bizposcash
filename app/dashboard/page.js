@@ -397,7 +397,8 @@ export default function Dashboard() {
   const roleBadge = getRoleBadge()
 
   if (!user) {
-    return null
+    const classes = themeManager.getClasses()
+    return <div className={`h-screen w-screen ${classes.background}`} />
   }
 
   return (

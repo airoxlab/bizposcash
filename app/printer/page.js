@@ -916,7 +916,7 @@ const autoDiscoverPrinters = async () => {
   const isDark = themeManager.isDark()
 
   if (isLoading) {
-    return null
+    return <div className={`h-screen w-screen ${classes.background}`} />
   }
 
   return (

@@ -21,9 +21,25 @@ export default function ProtectedPage({
   pageName,
   allowClick = false // If true, shows blur but allows clicking through
 }) {
-  const [hasAccess, setHasAccess] = useState(true)
-  const [isLoading, setIsLoading] = useState(true)
-  const [userInfo, setUserInfo] = useState(null)
+  // Initialize synchronously when permissions are already cached — no spinner flash
+  const [hasAccess, setHasAccess] = useState(() => {
+    try {
+      if (permissionManager.isPermissionsLoaded()) {
+        return permissionManager.hasPermission(permissionKey)
+      }
+      return true // Default to access; useEffect will correct if needed
+    } catch { return true }
+  })
+  const [isLoading, setIsLoading] = useState(() => {
+    try { return !permissionManager.isPermissionsLoaded() } catch { return true }
+  })
+  const [userInfo, setUserInfo] = useState(() => {
+    try {
+      return permissionManager.isPermissionsLoaded()
+        ? { name: authManager.getDisplayName(), role: authManager.getRole() }
+        : null
+    } catch { return null }
+  })
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [notification, setNotification] = useState(null) // { type: 'success' | 'error', message: '', count: 0 }
 
@@ -33,7 +49,7 @@ export default function ProtectedPage({
 
   const checkAccess = async () => {
     try {
-      // Wait a bit for permissions to load if not loaded yet
+      // Only async-load if not already loaded
       if (!permissionManager.isPermissionsLoaded()) {
         await permissionManager.loadPermissions()
       }
@@ -93,20 +109,9 @@ export default function ProtectedPage({
     }
   }
 
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // If has access, render children normally
-  if (hasAccess) {
+  // While loading (permissions not yet cached), render children silently
+  // — avoids the spinner flash. useEffect will apply blur if access is denied.
+  if (isLoading || hasAccess) {
     return <>{children}</>
   }
 
