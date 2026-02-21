@@ -1,6 +1,6 @@
 {
   "name": "BizPOS",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Modern POS Software - BizPOS",
   "main": "electron/main.js",
   "homepage": "./",
@@ -104,7 +104,7 @@
       "icon": "electron/assets/icon.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
