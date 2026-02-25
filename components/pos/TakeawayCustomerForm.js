@@ -29,6 +29,7 @@ export default function TakeawayCustomerForm({
   const [allCustomers, setAllCustomers] = useState([])
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1)
+  const [isSaving, setIsSaving] = useState(false)
 
   const searchInputRef = useRef(null)
   const suggestionsRef = useRef(null)
@@ -376,6 +377,9 @@ export default function TakeawayCustomerForm({
       return
     }
 
+    if (isSaving) return
+    setIsSaving(true)
+
     try {
       // Split full name into first and last name for backend
       const nameParts = formData.fullName.trim().split(' ')
@@ -398,7 +402,7 @@ export default function TakeawayCustomerForm({
         formData.phone,
         customerData
       )
-      
+
       console.log('✅ Customer saved:', savedCustomer)
 
       // Call parent submit with saved customer
@@ -407,7 +411,7 @@ export default function TakeawayCustomerForm({
         orderInstructions: formData.instructions,
         takeawayTime: formData.takeawayTime
       })
-      
+
       // Refresh customers cache immediately
       try {
         const refreshedCustomers = await cacheManager.refreshCustomers()
@@ -423,6 +427,8 @@ export default function TakeawayCustomerForm({
     } catch (error) {
       console.error('Error submitting customer:', error)
       notify.error('Failed to save customer', { duration: 2000 })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -714,11 +720,12 @@ export default function TakeawayCustomerForm({
               type="button"
               onClick={handleSubmit}
               onKeyDown={handleKeyDown}
-              className="flex-[2] px-5 py-3 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white font-bold rounded-lg transition-all shadow-lg"
+              disabled={isSaving}
+              className={`flex-[2] px-5 py-3 bg-gradient-to-r from-orange-600 to-red-600 text-white font-bold rounded-lg transition-all shadow-lg ${isSaving ? 'opacity-50 cursor-not-allowed' : 'hover:from-orange-700 hover:to-red-700'}`}
             >
               <div className="flex items-center justify-center">
                 <Check className="w-4 h-4 mr-2" />
-                Save
+                {isSaving ? 'Saving...' : 'Save'}
               </div>
             </button>
           </div>

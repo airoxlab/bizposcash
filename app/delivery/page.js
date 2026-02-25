@@ -2123,7 +2123,7 @@ export default function DeliveryPage() {
           product={selectedProduct}
           variants={productVariants}
           onAddToCart={handleAddToCart}
-          onBack={() => setCurrentView('products')}
+          onBack={() => { setCurrentView('products'); setTimeout(() => productGridRef.current?.focusSearch(), 50) }}
           classes={classes}
           isDark={isDark}
         />
@@ -2134,7 +2134,7 @@ export default function DeliveryPage() {
           deal={selectedDeal}
           dealProducts={dealProducts}
           onAddToCart={handleAddToCart}
-          onBack={() => setCurrentView('products')}
+          onBack={() => { setCurrentView('products'); setTimeout(() => productGridRef.current?.focusSearch(), 50) }}
           classes={classes}
           isDark={isDark}
         />

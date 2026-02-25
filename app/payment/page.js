@@ -547,8 +547,8 @@ const processOrder = async () => {
         if (itemError) throw itemError
       }
 
-      // CRITICAL FIX: Update customer ledger entry if payment method is Account
-      if (selectedPaymentMethod?.id === 'account' && orderData.customer?.id) {
+      // CRITICAL FIX: Update customer ledger entry if payment method is Account or Unpaid with a customer
+      if ((selectedPaymentMethod?.id === 'account' || selectedPaymentMethod?.id === 'unpaid') && orderData.customer?.id) {
         try {
           console.log('💳 [Payment] Updating customer ledger for modified order')
 
@@ -596,7 +596,7 @@ const processOrder = async () => {
               balance_before: currentBalance,
               balance_after: newBalance,
               order_id: orderData.existingOrderId,
-              description: `Order #${orderData.existingOrderNumber} - ${orderData.orderType?.toUpperCase() || 'WALKIN'} (Modified)`,
+              description: `Order #${orderData.existingOrderNumber} - ${orderData.orderType?.toUpperCase() || 'WALKIN'} (Modified${selectedPaymentMethod?.id === 'unpaid' ? ' - Unpaid' : ''})`,
               notes: `Order modified - Updated total: Rs ${orderData.total}`,
               created_by: currentUser.id
             })
@@ -762,10 +762,10 @@ const processOrder = async () => {
         }
       }
 
-      // NOTE: Customer Account ledger entry is created automatically in cacheManager.syncOrder()
+      // NOTE: Customer Account/Unpaid ledger entry is created automatically in cacheManager.syncOrder()
       // No need to create it here to avoid duplicates
-      if (selectedPaymentMethod?.id === 'account' && orderData.customer?.id) {
-        console.log(`💳 [Payment] Customer Account selected - ledger entry will be created during order sync`)
+      if ((selectedPaymentMethod?.id === 'account' || selectedPaymentMethod?.id === 'unpaid') && orderData.customer?.id) {
+        console.log(`💳 [Payment] ${selectedPaymentMethod.name} payment with customer - ledger entry will be created during order sync`)
       }
     }
 

@@ -2507,7 +2507,7 @@ export default function WalkInPage() {
           product={selectedProduct}
           variants={productVariants}
           onAddToCart={handleAddToCart}
-          onBack={() => setCurrentView('products')}
+          onBack={() => { setCurrentView('products'); setTimeout(() => productGridRef.current?.focusSearch(), 50) }}
           classes={classes}
           isDark={isDark}
         />
@@ -2518,7 +2518,7 @@ export default function WalkInPage() {
           deal={selectedDeal}
           dealProducts={dealProducts}
           onAddToCart={handleAddToCart}
-          onBack={() => setCurrentView('products')}
+          onBack={() => { setCurrentView('products'); setTimeout(() => productGridRef.current?.focusSearch(), 50) }}
           classes={classes}
           isDark={isDark}
         />
@@ -2579,6 +2579,8 @@ export default function WalkInPage() {
         isReopenedOrder={isReopenedOrder}
         onToggleTheme={toggleTheme}
         selectedTable={selectedTable}
+        onChangeTable={() => setCurrentView('tables')}
+        onInstructionsChange={setOrderInstructions}
       />
 
       {/* Customer Form */}

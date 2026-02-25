@@ -2077,7 +2077,7 @@ export default function TakeawayPage() {
           product={selectedProduct}
           variants={productVariants}
           onAddToCart={handleAddToCart}
-          onBack={() => setCurrentView('products')}
+          onBack={() => { setCurrentView('products'); setTimeout(() => productGridRef.current?.focusSearch(), 50) }}
           classes={classes}
           isDark={isDark}
         />
@@ -2088,7 +2088,7 @@ export default function TakeawayPage() {
           deal={selectedDeal}
           dealProducts={dealProducts}
           onAddToCart={handleAddToCart}
-          onBack={() => setCurrentView('products')}
+          onBack={() => { setCurrentView('products'); setTimeout(() => productGridRef.current?.focusSearch(), 50) }}
           classes={classes}
           isDark={isDark}
         />

@@ -27,6 +27,7 @@ export default function WalkInCustomerForm({
   const [allCustomers, setAllCustomers] = useState([])
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1)
+  const [isSaving, setIsSaving] = useState(false)
 
   const searchInputRef = useRef(null)
   const suggestionsRef = useRef(null)
@@ -313,6 +314,9 @@ export default function WalkInCustomerForm({
       return
     }
 
+    if (isSaving) return
+    setIsSaving(true)
+
     try {
       // Split full name into first and last name for backend
       const nameParts = formData.fullName.trim().split(' ')
@@ -335,7 +339,7 @@ export default function WalkInCustomerForm({
         formData.phone,
         customerData
       )
-      
+
       console.log('✅ Customer saved:', savedCustomer)
 
       // Call parent submit with saved customer
@@ -344,7 +348,7 @@ export default function WalkInCustomerForm({
         customer: savedCustomer,
         orderInstructions: formData.instructions
       })
-      
+
       // Refresh customers cache immediately
       try {
         const refreshedCustomers = await cacheManager.refreshCustomers()
@@ -360,6 +364,8 @@ export default function WalkInCustomerForm({
     } catch (error) {
       console.error('Error submitting customer:', error)
       notify.error('Failed to save customer', { duration: 2000 })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -572,11 +578,12 @@ export default function WalkInCustomerForm({
               type="button"
               onClick={handleSubmit}
               onKeyDown={handleKeyDown}
-              className="flex-[2] px-5 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold rounded-lg transition-all shadow-lg"
+              disabled={isSaving}
+              className={`flex-[2] px-5 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold rounded-lg transition-all shadow-lg ${isSaving ? 'opacity-50 cursor-not-allowed' : 'hover:from-purple-700 hover:to-blue-700'}`}
             >
               <div className="flex items-center justify-center">
                 <Check className="w-4 h-4 mr-2" />
-                Save
+                {isSaving ? 'Saving...' : 'Save'}
               </div>
             </button>
           </div>

@@ -36,6 +36,7 @@ export default function DeliveryCustomerForm({
   const [allCustomers, setAllCustomers] = useState([])
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1)
+  const [isSaving, setIsSaving] = useState(false)
   const [deliveryBoys, setDeliveryBoys] = useState([])
   const [loadingDeliveryBoys, setLoadingDeliveryBoys] = useState(false)
 
@@ -609,6 +610,9 @@ export default function DeliveryCustomerForm({
       return
     }
 
+    if (isSaving) return
+    setIsSaving(true)
+
     try {
       // Split full name into first and last name for backend
       const nameParts = formData.fullName.trim().split(' ')
@@ -683,6 +687,8 @@ export default function DeliveryCustomerForm({
     } catch (error) {
       console.error('Error submitting customer:', error)
       notify.error('Failed to save customer', { duration: 2000 })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -1282,11 +1288,12 @@ export default function DeliveryCustomerForm({
               type="button"
               onClick={handleSubmit}
               onKeyDown={handleKeyDown}
-              className="flex-[2] px-5 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold rounded-lg transition-all shadow-lg"
+              disabled={isSaving}
+              className={`flex-[2] px-5 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-bold rounded-lg transition-all shadow-lg ${isSaving ? 'opacity-50 cursor-not-allowed' : 'hover:from-blue-700 hover:to-cyan-700'}`}
             >
               <div className="flex items-center justify-center">
                 <Check className="w-4 h-4 mr-2" />
-                Save
+                {isSaving ? 'Saving...' : 'Save'}
               </div>
             </button>
           </div>

@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { ArrowLeft, Plus, Minus, Check, ChevronDown, ChevronUp } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export default function VariantSelectionScreen({
   product,
@@ -15,6 +15,47 @@ export default function VariantSelectionScreen({
   const [selectedVariant, setSelectedVariant] = useState(null)
   const [quantity, setQuantity] = useState(1)
   const [isIngredientsOpen, setIsIngredientsOpen] = useState(false)
+  const firstVariantBtnRef = useRef(null)
+  const variantContainerRef = useRef(null)
+
+  // Arrow key navigation between variant buttons
+  const handleVariantKeyDown = (e, variant) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault()
+      const btns = [...variantContainerRef.current.querySelectorAll('button')]
+      const idx = btns.indexOf(e.currentTarget)
+      if (idx < btns.length - 1) btns[idx + 1].focus()
+      return
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const btns = [...variantContainerRef.current.querySelectorAll('button')]
+      const idx = btns.indexOf(e.currentTarget)
+      if (idx > 0) btns[idx - 1].focus()
+      return
+    }
+  }
+
+  // Auto-focus first variant button on mount
+  useEffect(() => {
+    if (variants && variants.length > 0) {
+      const t = setTimeout(() => firstVariantBtnRef.current?.focus(), 100)
+      return () => clearTimeout(t)
+    }
+  }, [])
+
+  // Escape → go back
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onBack()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onBack])
 
   // Auto-add to cart when variant is selected (if variants exist) or immediately if no variants
   const autoAddToCart = (variant = null) => {
@@ -135,6 +176,11 @@ export default function VariantSelectionScreen({
             <p className={`${classes.textSecondary} text-sm`}>
               {variants.length > 0 ? 'Select a size to continue' : `Rs ${product.base_price}`}
             </p>
+            {variants.length > 0 && (
+              <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                ESC = Back &nbsp;•&nbsp; Arrow keys = Navigate &nbsp;•&nbsp; Enter = Select
+              </p>
+            )}
           </div>
 
           <div className="text-right">
@@ -188,20 +234,22 @@ export default function VariantSelectionScreen({
               )}
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {variants.map((variant) => {
+            <div ref={variantContainerRef} className="flex flex-wrap gap-2">
+              {variants.map((variant, index) => {
                 const variantPrice = parseFloat(variant.price)
                 const isSelected = selectedVariant?.id === variant.id
 
                 return (
                   <motion.button
                     key={variant.id}
+                    ref={index === 0 ? firstVariantBtnRef : null}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => {
                       setSelectedVariant(variant)
                       autoAddToCart(variant)
                     }}
+                    onKeyDown={(e) => handleVariantKeyDown(e, variant)}
                     className={`px-4 py-2 rounded-lg border-2 transition-all duration-200 flex items-center space-x-2 ${isSelected
                       ? `border-green-500 ${isDark ? 'bg-green-900/20' : 'bg-green-50'}`
                       : `${classes.border} border-gray-200 hover:border-green-300 hover:${isDark ? 'bg-gray-700/50' : 'bg-gray-50'}`

@@ -1,7 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { User, ShoppingCart, Plus, Minus, Trash2, WifiOff, Edit3, Gift, X, Sun, Moon, Wifi, AlertCircle, Table2 } from 'lucide-react'
+import { User, ShoppingCart, Plus, Minus, Trash2, WifiOff, Edit3, Gift, X, Sun, Moon, Wifi, AlertCircle, Table2, FileText, Check } from 'lucide-react'
 import LoyaltyPointsDisplay from '@/components/pos/LoyaltyPointsDisplay'
 import { notify } from '../ui/NotificationSystem'
 
@@ -22,14 +23,26 @@ export default function CartSidebar({
   orderType = 'walkin',
   isReopenedOrder = false,
   onToggleTheme,
-  selectedTable
+  selectedTable,
+  onChangeTable,
+  onInstructionsChange
 }) {
+  const [showInstructionPanel, setShowInstructionPanel] = useState(false)
+  const [draftInstruction, setDraftInstruction] = useState('')
   const getOrderTypeTitle = () => {
     switch(orderType) {
       case 'walkin': return 'POS Walk-in'
       case 'takeaway': return 'POS Takeaway'
       case 'delivery': return 'POS Delivery'
       default: return 'POS'
+    }
+  }
+
+  const getHeaderGradient = () => {
+    switch(orderType) {
+      case 'takeaway': return 'bg-gradient-to-r from-orange-600 to-red-600'
+      case 'delivery': return 'bg-gradient-to-r from-blue-600 to-cyan-600'
+      default: return 'bg-gradient-to-r from-purple-600 to-blue-600'
     }
   }
 
@@ -148,54 +161,66 @@ export default function CartSidebar({
         )}
       </div>
 
-      {/* Table & Customer Info Row */}
+      {/* Action Row - Table / Customer / Instruction */}
       <div className={`p-2 ${classes.border} border-b ${isDark ? 'bg-gray-900/50' : 'bg-gray-50'}`}>
-        <div className="flex items-center gap-2">
-          {/* Selected Table - Compact */}
+        <div className="flex items-center gap-1.5">
+
+          {/* Table Button - only when table is selected */}
           {selectedTable && (
-            <div className={`flex-1 ${isDark ? 'bg-purple-900/20 border-purple-700' : 'bg-purple-50 border-purple-300'} border rounded-lg p-1.5`}>
-              <div className="flex items-center space-x-1.5">
-                <Table2 className={`w-3.5 h-3.5 ${isDark ? 'text-purple-400' : 'text-purple-600'} flex-shrink-0`} />
-                <p className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-700'} font-medium truncate`}>
-                  {selectedTable.table_name || `Table ${selectedTable.table_number}`}
-                </p>
-              </div>
-            </div>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onChangeTable}
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                isDark ? 'bg-purple-900/30 border-purple-700 text-purple-300 hover:bg-purple-900/50' : 'bg-purple-50 border-purple-300 text-purple-700 hover:bg-purple-100'
+              }`}
+            >
+              <Table2 className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate">{selectedTable.table_name || selectedTable.table_number}</span>
+            </motion.button>
           )}
 
-          {/* Customer Info - Compact */}
+          {/* Customer Button */}
           {customer ? (
-            <div className={`flex-1 ${isDark ? 'bg-green-900/20 border-green-700' : 'bg-green-50 border-green-300'} border rounded-lg p-1.5`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-1.5 min-w-0 flex-1">
-                  <User className={`w-3.5 h-3.5 ${isDark ? 'text-green-400' : 'text-green-600'} flex-shrink-0`} />
-                  <p className={`text-xs ${isDark ? 'text-green-300' : 'text-green-700'} font-medium truncate`}>
-                    {customer.full_name?.trim() || customer.phone}
-                  </p>
-                </div>
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={onShowCustomerForm}
-                  className={`p-1 ${isDark ? 'bg-purple-600 hover:bg-purple-700' : 'bg-purple-500 hover:bg-purple-600'} rounded transition-colors flex-shrink-0 ml-1`}
-                >
-                  <Edit3 className="w-3 h-3 text-white" />
-                </motion.button>
-              </div>
-            </div>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onShowCustomerForm}
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                isDark ? 'bg-green-900/30 border-green-700 text-green-300 hover:bg-green-900/50' : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100'
+              }`}
+            >
+              <User className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate">{customer.full_name?.trim() || customer.phone}</span>
+            </motion.button>
           ) : (
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={onShowCustomerForm}
-              className={`flex-1 flex items-center justify-center p-1.5 ${classes.card} rounded-lg ${classes.border} border border-dashed hover:border-purple-500`}
+              className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border border-dashed transition-all ${
+                isDark ? 'border-gray-600 text-gray-400 hover:border-purple-500 hover:text-purple-400' : 'border-gray-300 text-gray-500 hover:border-purple-400 hover:text-purple-600'
+              }`}
             >
-              <User className="w-3.5 h-3.5 text-purple-600 mr-1.5" />
-              <span className={`text-xs font-medium ${classes.textPrimary}`}>
-                Add Customer
-              </span>
+              <User className="w-3 h-3" />
+              <span>Customer</span>
             </motion.button>
           )}
+
+          {/* Instruction Button */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => { setDraftInstruction(orderInstructions); setShowInstructionPanel(true) }}
+            className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+              orderInstructions
+                ? isDark ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-amber-50 border-amber-400 text-amber-700'
+                : isDark ? 'border-gray-600 text-gray-400 hover:border-amber-500 hover:text-amber-400' : 'border-gray-300 text-gray-500 hover:border-amber-400 hover:text-amber-600'
+            }`}
+          >
+            <FileText className="w-3 h-3" />
+            <span>Instruction</span>
+          </motion.button>
         </div>
       </div>
 
@@ -369,6 +394,92 @@ export default function CartSidebar({
               Order & Pay Rs {calculateTotal().toFixed(2)}
             </div>
           </motion.button>
+        </div>
+      )}
+
+      {/* Instruction Full-Screen Popup */}
+      {showInstructionPanel && (
+        <div className="fixed inset-0 z-[60] flex justify-end">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowInstructionPanel(false)}
+          />
+
+          {/* Panel */}
+          <div className={`relative w-full max-w-md h-full ${isDark ? 'bg-gray-900' : 'bg-white'} shadow-2xl flex flex-col`}>
+            {/* Header */}
+            <div className={`${getHeaderGradient()} p-5`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
+                    <FileText className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Order Instruction</h2>
+                    <p className="text-white/90 text-xs">Optional note for this order</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowInstructionPanel(false)}
+                  className="w-9 h-9 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-colors"
+                >
+                  <X className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-5">
+              <label className={`block text-sm font-semibold mb-2 flex items-center ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>
+                <FileText className={`w-4 h-4 mr-2 ${orderType === 'takeaway' ? 'text-orange-500' : orderType === 'delivery' ? 'text-blue-500' : 'text-purple-500'}`} />
+                Instructions
+                <span className={`ml-2 text-xs font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>(Optional)</span>
+              </label>
+              <textarea
+                autoFocus
+                value={draftInstruction}
+                onChange={(e) => setDraftInstruction(e.target.value)}
+                rows={5}
+                className={`w-full px-4 py-3 rounded-lg border-2 resize-none transition-all focus:outline-none focus:ring-2 ${
+                  isDark
+                    ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500 focus:border-amber-500 focus:ring-amber-500/20'
+                    : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-amber-500 focus:ring-amber-500/20'
+                }`}
+                placeholder="Any special requests or notes for this order..."
+              />
+            </div>
+
+            {/* Footer */}
+            <div className={`border-t p-4 ${isDark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
+              <div className="flex space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowInstructionPanel(false)}
+                  className={`flex-1 px-5 py-3 font-semibold rounded-lg transition-all ${
+                    isDark
+                      ? 'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700'
+                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-center">
+                    <X className="w-4 h-4 mr-2" />
+                    Cancel
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { onInstructionsChange?.(draftInstruction); setShowInstructionPanel(false) }}
+                  className={`flex-[2] px-5 py-3 ${getHeaderGradient()} text-white font-bold rounded-lg transition-all shadow-lg opacity-100 hover:opacity-90`}
+                >
+                  <div className="flex items-center justify-center">
+                    <Check className="w-4 h-4 mr-2" />
+                    Save
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

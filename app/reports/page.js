@@ -1386,7 +1386,9 @@ const calculateProfitData = (salesDataParam, expenseDataParam) => {
                 onClick={() => setActiveReportTab(tab.id)}
                 className={`flex items-center px-3 py-2 rounded-md text-xs font-medium transition-all ${activeReportTab === tab.id
                   ? 'bg-purple-600 text-white shadow-sm'
-                  : `${themeClasses.textSecondary} hover:${themeClasses.textPrimary} hover:bg-purple-100 ${isDark ? 'hover:bg-gray-700' : ''}`
+                  : isDark
+                    ? 'text-gray-300 hover:text-purple-300 hover:bg-purple-900/40'
+                    : 'text-gray-600 hover:text-purple-700 hover:bg-purple-100'
                   }`}
               >
                 <tab.icon className="w-4 h-4 mr-2" />

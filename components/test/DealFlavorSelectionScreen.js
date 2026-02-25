@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { ArrowLeft, Plus, Minus, Gift, Check } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export default function DealFlavorSelectionScreen({
   deal,
@@ -16,6 +16,41 @@ export default function DealFlavorSelectionScreen({
   const [selectedFlavors, setSelectedFlavors] = useState({})
   const [selectedProducts, setSelectedProducts] = useState({})
   const [priceAdjustments, setPriceAdjustments] = useState({})
+  const firstProductBtnRef = useRef(null)
+
+  // Auto-focus first product button on mount
+  useEffect(() => {
+    const t = setTimeout(() => firstProductBtnRef.current?.focus(), 150)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Global keyboard shortcuts for deal screen
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onBack()
+        return
+      }
+      if ((e.key === '+' || e.key === '=') && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        setQuantity(q => q + 1)
+        return
+      }
+      if (e.key === '-' && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        setQuantity(q => Math.max(1, q - 1))
+        return
+      }
+      if (e.key === 'Enter' && e.ctrlKey) {
+        e.preventDefault()
+        if (canAddToCart()) handleAddToCart()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onBack])
 
   // Helper function to get base price (minimum variant price)
   const getBasePrice = (product) => {
@@ -218,6 +253,9 @@ export default function DealFlavorSelectionScreen({
             <p className={`${classes.textSecondary} text-sm`}>
               Special Deal - Rs {deal.price}
             </p>
+            <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+              ESC = Back &nbsp;•&nbsp; +/− = Qty &nbsp;•&nbsp; Ctrl+Enter = Add to Cart
+            </p>
           </div>
 
           <div className="text-right">
@@ -249,6 +287,7 @@ export default function DealFlavorSelectionScreen({
                 return (
                   <motion.button
                     key={index}
+                    ref={index === 0 ? firstProductBtnRef : null}
                     whileHover={{ scale: isLocked ? 1 : 1.05 }}
                     whileTap={{ scale: isLocked ? 1 : 0.95 }}
                     onClick={() => !isLocked && handleProductToggle(product.id)}

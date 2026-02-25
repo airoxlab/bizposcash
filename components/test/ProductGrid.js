@@ -1,7 +1,7 @@
 'use client'
 
 import { Plus, Coffee, Search, X } from 'lucide-react'
-import { useRef, forwardRef, useImperativeHandle, useMemo, useState } from 'react'
+import { useRef, forwardRef, useImperativeHandle, useMemo, useState, useEffect } from 'react'
 import { cacheManager } from '../../lib/cacheManager'
 
 const ProductGrid = forwardRef(({
@@ -18,7 +18,13 @@ const ProductGrid = forwardRef(({
   const productRefs = useRef({})
   const dealRef = useRef(null)
   const searchInputRef = useRef(null)
+  const gridContainerRef = useRef(null)
   const [searchQuery, setSearchQuery] = useState('')
+
+  // Auto-focus search on mount
+  useEffect(() => {
+    searchInputRef.current?.focus()
+  }, [])
 
   // Memoize category→products mapping so it's not recomputed on every render
   const productsByCategory = useMemo(() => {
@@ -44,7 +50,7 @@ const ProductGrid = forwardRef(({
     return { products: matchedProducts, deals: matchedDeals }
   }, [searchQuery, allProducts, deals])
 
-  // Expose scroll methods to parent component
+  // Expose scroll/focus methods to parent component
   useImperativeHandle(ref, () => ({
     scrollToCategory: (categoryId) => {
       const element = productRefs.current[categoryId]
@@ -56,8 +62,55 @@ const ProductGrid = forwardRef(({
       if (dealRef.current) {
         dealRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
       }
+    },
+    focusSearch: () => {
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
     }
   }))
+
+  // Keyboard navigation: ArrowDown from search → first card
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const firstCard = gridContainerRef.current?.querySelector('[data-kb-card]')
+      firstCard?.focus()
+    }
+  }
+
+  // Keyboard navigation on product/deal cards
+  const handleCardKeyDown = (e, clickHandler) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      clickHandler()
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      searchInputRef.current?.focus()
+      return
+    }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault()
+      const cards = [...gridContainerRef.current.querySelectorAll('[data-kb-card]')]
+      const idx = cards.indexOf(e.currentTarget)
+      if (idx < cards.length - 1) cards[idx + 1].focus()
+      return
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const cards = [...gridContainerRef.current.querySelectorAll('[data-kb-card]')]
+      const idx = cards.indexOf(e.currentTarget)
+      if (idx > 0) cards[idx - 1].focus()
+      else searchInputRef.current?.focus()
+      return
+    }
+    // Any printable character → focus search and append
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      searchInputRef.current?.focus()
+      setSearchQuery(prev => prev + e.key)
+    }
+  }
 
   const clearSearch = () => {
     setSearchQuery('')
@@ -101,6 +154,7 @@ const ProductGrid = forwardRef(({
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Search products..."
             className={`w-full pl-9 pr-8 py-2.5 text-sm bg-transparent outline-none ${classes.textPrimary} placeholder:${classes.textSecondary}`}
           />
@@ -115,7 +169,7 @@ const ProductGrid = forwardRef(({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-scroll p-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      <div ref={gridContainerRef} className="flex-1 overflow-y-scroll p-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
         <style jsx>{`
           div::-webkit-scrollbar {
             display: none;
@@ -142,11 +196,14 @@ const ProductGrid = forwardRef(({
                 {searchResults.products.map((product) => (
                   <div
                     key={product.id}
+                    data-kb-card="true"
+                    tabIndex={0}
                     onClick={() => onProductClick(product)}
+                    onKeyDown={(e) => handleCardKeyDown(e, () => onProductClick(product))}
                     className={`${classes.card} rounded-xl ${classes.shadow} shadow-lg cursor-pointer overflow-hidden group ${classes.border} border
                       transition-all duration-200 ease-out
                       hover:-translate-y-1 hover:scale-[1.02] hover:shadow-xl
-                      active:scale-[0.98]`}
+                      active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-green-500`}
                   >
                     <div className={`relative aspect-square ${isDark ? 'bg-gray-700' : 'bg-gray-100'} overflow-hidden`}>
                       {product.image_url ? (
@@ -185,13 +242,16 @@ const ProductGrid = forwardRef(({
                 {searchResults.deals.map((deal) => (
                   <div
                     key={`deal-${deal.id}`}
+                    data-kb-card="true"
+                    tabIndex={deal.isOutOfTime ? -1 : 0}
                     onClick={() => !deal.isOutOfTime && onDealClick(deal)}
+                    onKeyDown={(e) => !deal.isOutOfTime && handleCardKeyDown(e, () => onDealClick(deal))}
                     className={`${classes.card} rounded-xl ${classes.shadow} shadow-lg overflow-hidden group ${classes.border} border
                       ${deal.isOutOfTime
                         ? 'cursor-not-allowed opacity-70'
                         : `cursor-pointer transition-all duration-200 ease-out
                            hover:-translate-y-1 hover:scale-[1.02] hover:shadow-xl
-                           active:scale-[0.98]`
+                           active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-green-500`
                       }`}
                   >
                     <div className={`relative aspect-square ${isDark ? 'bg-gray-700' : 'bg-gray-100'} overflow-hidden`}>
@@ -261,11 +321,14 @@ const ProductGrid = forwardRef(({
                     {categoryProducts.map((product) => (
                       <div
                         key={product.id}
+                        data-kb-card="true"
+                        tabIndex={0}
                         onClick={() => onProductClick(product)}
+                        onKeyDown={(e) => handleCardKeyDown(e, () => onProductClick(product))}
                         className={`${classes.card} rounded-xl ${classes.shadow} shadow-lg cursor-pointer overflow-hidden group ${classes.border} border
                           transition-all duration-200 ease-out
                           hover:-translate-y-1 hover:scale-[1.02] hover:shadow-xl
-                          active:scale-[0.98]`}
+                          active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-green-500`}
                       >
                         <div className={`relative aspect-square ${isDark ? 'bg-gray-700' : 'bg-gray-100'} overflow-hidden`}>
                           {product.image_url ? (
@@ -324,13 +387,16 @@ const ProductGrid = forwardRef(({
                   {deals.map((deal) => (
                     <div
                       key={deal.id}
+                      data-kb-card="true"
+                      tabIndex={deal.isOutOfTime ? -1 : 0}
                       onClick={() => !deal.isOutOfTime && onDealClick(deal)}
+                      onKeyDown={(e) => !deal.isOutOfTime && handleCardKeyDown(e, () => onDealClick(deal))}
                       className={`${classes.card} rounded-xl ${classes.shadow} shadow-lg overflow-hidden group ${classes.border} border
                         ${deal.isOutOfTime
                           ? 'cursor-not-allowed opacity-70'
                           : `cursor-pointer transition-all duration-200 ease-out
                              hover:-translate-y-1 hover:scale-[1.02] hover:shadow-xl
-                             active:scale-[0.98]`
+                             active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-green-500`
                         }`}
                     >
                       <div className={`relative aspect-square ${isDark ? 'bg-gray-700' : 'bg-gray-100'} overflow-hidden`}>

@@ -188,12 +188,12 @@ export default function LedgerTab({ userId, startDate, endDate }) {
     const num = Number(balance || 0);
     if (num > 0) {
       // Customer owes money
-      return { amount: formatCurrency(num), type: 'debit', color: 'text-red-600' };
+      return { amount: formatCurrency(num), type: 'debit', color: isDark ? 'text-red-400' : 'text-red-600' };
     } else if (num < 0) {
       // Customer has credit (advance payment)
-      return { amount: formatCurrency(num), type: 'credit', color: 'text-green-600' };
+      return { amount: formatCurrency(num), type: 'credit', color: isDark ? 'text-green-400' : 'text-green-600' };
     } else {
-      return { amount: formatCurrency(0), type: 'clear', color: 'text-gray-500' };
+      return { amount: formatCurrency(0), type: 'clear', color: isDark ? 'text-gray-400' : 'text-gray-500' };
     }
   };
 
@@ -250,6 +250,7 @@ export default function LedgerTab({ userId, startDate, endDate }) {
 
   const styles = themeManager.getComponentStyles();
   const classes = themeManager.getClasses();
+  const isDark = themeManager.isDark();
 
   return (
     <div className="space-y-8 pb-8">
@@ -365,16 +366,16 @@ export default function LedgerTab({ userId, startDate, endDate }) {
                     const hasHistory = effectiveBalance !== 0 || (customer.last_payment_amount || 0) > 0 || (customer.unpaid_orders_count || 0) > 0;
 
                     return (
-                      <tr key={customer.customer_id || customer.id} className={`${classes.hover} ${hasHistory ? 'bg-purple-50/30 dark:bg-purple-900/10' : ''}`}>
+                      <tr key={customer.customer_id || customer.id} className={`${classes.hover} ${hasHistory ? isDark ? 'bg-purple-900/10' : 'bg-purple-50/30' : ''}`}>
                         <td className={`${styles.tableCell} font-medium`}>
                           <div className="flex items-center gap-2">
-                            <div className={`w-10 h-10 rounded-full ${hasHistory ? 'bg-purple-100 dark:bg-purple-900/40' : 'bg-gray-100 dark:bg-gray-700'} flex items-center justify-center`}>
-                              <User className={`w-5 h-5 ${hasHistory ? 'text-purple-600' : 'text-gray-400'}`} />
+                            <div className={`w-10 h-10 rounded-full ${hasHistory ? isDark ? 'bg-purple-900/40' : 'bg-purple-100' : isDark ? 'bg-gray-700' : 'bg-gray-100'} flex items-center justify-center`}>
+                              <User className={`w-5 h-5 ${hasHistory ? isDark ? 'text-purple-400' : 'text-purple-600' : isDark ? 'text-gray-500' : 'text-gray-400'}`} />
                             </div>
                             <div>
-                              <p>{customer.full_name || 'N/A'}</p>
+                              <p className={isDark ? 'text-gray-100' : 'text-gray-900'}>{customer.full_name || 'N/A'}</p>
                               {hasHistory && (
-                                <p className="text-xs text-purple-600 dark:text-purple-400">Has Ledger History</p>
+                                <p className={`text-xs ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>Has Ledger History</p>
                               )}
                             </div>
                           </div>
@@ -388,27 +389,27 @@ export default function LedgerTab({ userId, startDate, endDate }) {
                               {balanceInfo.amount}
                             </p>
                             {balanceInfo.type === 'credit' && (
-                              <p className="text-xs text-green-600">Credit Balance</p>
+                              <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}>Credit Balance</p>
                             )}
                             {balanceInfo.type === 'debit' && (
-                              <p className="text-xs text-red-600">Outstanding</p>
+                              <p className={`text-xs ${isDark ? 'text-red-400' : 'text-red-600'}`}>Outstanding</p>
                             )}
                           </div>
                         </td>
                         <td className={`${styles.tableCell} text-center`}>
                           <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                             balanceInfo.type === 'debit'
-                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                              ? isDark ? 'bg-red-900/30 text-red-400' : 'bg-red-100 text-red-700'
                               : balanceInfo.type === 'credit'
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                              : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-400'
+                              ? isDark ? 'bg-green-900/30 text-green-400' : 'bg-green-100 text-green-700'
+                              : isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-700'
                           }`}>
                             {balanceInfo.type === 'debit' ? 'Has Due' : balanceInfo.type === 'credit' ? 'Credit' : 'Clear'}
                           </span>
                         </td>
                         <td className={`${styles.tableCell} text-right`}>
                           <div>
-                            <p className="font-medium">{formatCurrency(customer.last_payment_amount || 0)}</p>
+                            <p className={`font-medium ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>{formatCurrency(customer.last_payment_amount || 0)}</p>
                             <p className={`text-xs ${classes.textSecondary}`}>
                               {customer.last_payment_date ? formatDate(customer.last_payment_date) : 'Never'}
                             </p>
