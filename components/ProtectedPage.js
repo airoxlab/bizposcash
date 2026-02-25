@@ -49,23 +49,21 @@ export default function ProtectedPage({
 
   const checkAccess = async () => {
     try {
-      // Only async-load if not already loaded
+      // Only async-load if not already loaded AND permissionMap is empty
+      // (avoids re-fetching from Supabase on every page navigation)
       if (!permissionManager.isPermissionsLoaded()) {
         await permissionManager.loadPermissions()
       }
 
       const access = permissionManager.hasPermission(permissionKey)
-      const user = authManager.getCurrentUser()
       const role = authManager.getRole()
 
       setHasAccess(access)
-      setUserInfo({
-        name: authManager.getDisplayName(),
-        role: role
-      })
+      setUserInfo({ name: authManager.getDisplayName(), role })
       setIsLoading(false)
 
       if (!access) {
+        const user = authManager.getCurrentUser()
         console.log(`🚫 Access denied to ${pageName} for ${user?.cashier_name || user?.customer_name}`)
       }
     } catch (error) {

@@ -44,9 +44,9 @@ import ProtectedPage from '../../components/ProtectedPage'
 import { usePermissions, permissionManager } from '../../lib/permissionManager'
 
 export default function Dashboard() {
-  const [user, setUser] = useState(null)
-  const [userRole, setUserRole] = useState(null)
-  const [displayName, setDisplayName] = useState('')
+  const [user, setUser] = useState(() => authManager.isLoggedIn() ? authManager.getCurrentUser() : null)
+  const [userRole, setUserRole] = useState(() => authManager.getRole())
+  const [displayName, setDisplayName] = useState(() => authManager.getDisplayName() || '')
   const [currentTime, setCurrentTime] = useState(new Date())
   const [cacheStatus, setCacheStatus] = useState({
     isInitialized: false,

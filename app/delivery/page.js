@@ -28,14 +28,15 @@ import ProtectedPage from '../../components/ProtectedPage'
 export default function DeliveryPage() {
   const router = useRouter()
   const productGridRef = useRef(null)
+  const checkIntervalRef = useRef(null)
 
   const [user, setUser] = useState(null)
   const [userRole, setUserRole] = useState(null)
   const [cashierData, setCashierData] = useState(null)
   const [sessionId, setSessionId] = useState(null)
-  const [categories, setCategories] = useState([])
-  const [allProducts, setAllProducts] = useState([])
-  const [deals, setDeals] = useState([])
+  const [categories, setCategories] = useState(() => cacheManager.isReady() ? cacheManager.getCategories() : [])
+  const [allProducts, setAllProducts] = useState(() => cacheManager.isReady() ? cacheManager.getProducts() : [])
+  const [deals, setDeals] = useState(() => cacheManager.isReady() ? cacheManager.getDeals() : [])
   const [orderTypes, setOrderTypes] = useState([])
   const [cart, setCart] = useState([])
   const [customer, setCustomer] = useState(null)
@@ -43,8 +44,8 @@ export default function DeliveryPage() {
   const [deliveryTime, setDeliveryTime] = useState('')
   const [deliveryCharges, setDeliveryCharges] = useState(0)
   const [networkStatus, setNetworkStatus] = useState({ isOnline: true, unsyncedOrders: 0 })
-  const [isDataReady, setIsDataReady] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isDataReady, setIsDataReady] = useState(() => cacheManager.isReady())
+  const [isLoading, setIsLoading] = useState(() => !cacheManager.isReady())
   const [theme, setTheme] = useState('light')
   const [isReopenedOrder, setIsReopenedOrder] = useState(false)
   const [originalOrderId, setOriginalOrderId] = useState(null)
@@ -234,6 +235,7 @@ export default function DeliveryPage() {
 
     return () => {
       clearInterval(statusInterval)
+      clearInterval(checkIntervalRef.current)
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('orderReopened', handleOrderReopened)
     }
@@ -259,20 +261,20 @@ export default function DeliveryPage() {
       // Keep loading state true only if cache is not ready
 
       let attempts = 0
-      const maxAttempts = 30
+      const maxAttempts = 60
 
-      const checkInterval = setInterval(() => {
+      checkIntervalRef.current = setInterval(() => {
         attempts++
 
         if (cacheManager.isReady()) {
           console.log('✅ Cache became ready, loading data')
-          clearInterval(checkInterval)
+          clearInterval(checkIntervalRef.current)
           loadCachedData()
           setIsDataReady(true)
           setIsLoading(false)
         } else if (attempts >= maxAttempts) {
           console.log('⚠️ Cache timeout, trying to initialize manually')
-          clearInterval(checkInterval)
+          clearInterval(checkIntervalRef.current)
 
           cacheManager.initializeCache().then(() => {
             if (cacheManager.isReady()) {
@@ -2028,7 +2030,14 @@ export default function DeliveryPage() {
   const isDark = themeManager.isDark()
 
   if (isLoading || !isDataReady) {
-    return <div className={`h-screen w-screen ${classes.background}`} />
+    return (
+      <div className={`h-screen w-screen flex items-center justify-center ${classes.background}`}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-emerald-200 border-t-emerald-500" />
+          <p className={`text-sm font-medium ${classes.textSecondary}`}>Loading menu...</p>
+        </div>
+      </div>
+    )
   }
 
   return (

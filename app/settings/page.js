@@ -45,6 +45,7 @@ import themeManager from '../../lib/themeManager';
 import { authManager } from '../../lib/authManager';
 import { profileManager } from '../../lib/profileManager';
 import { supabase } from '../../lib/supabaseClient';
+import { cacheManager } from '../../lib/cacheManager';
 import ProtectedPage from '../../components/ProtectedPage';
 
 // Modern Toggle Switch Component
@@ -100,15 +101,20 @@ const ModernToggle = ({ checked, onChange, label, description, disabled = false 
 // BACKUP & RECOVERY PANEL
 // ─────────────────────────────────────────────────────────────
 function BackupPanel({ isDark, classes }) {
+  const router = useRouter();
   const [backupFolder, setBackupFolder] = useState(() =>
     typeof window !== 'undefined' ? (localStorage.getItem('pos_backup_folder') || '') : ''
   );
-  const [status, setStatus] = useState(null);
   const [backupIndex, setBackupIndex] = useState(null); // last auto-save info
   const [dataSummary, setDataSummary] = useState(null);
   const [isOnline, setIsOnline] = useState(
     typeof window !== 'undefined' ? navigator.onLine : true
   );
+
+  // ── Data Recovery state ──
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [importedCount, setImportedCount] = useState(null);
 
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.backup;
 
@@ -151,15 +157,17 @@ function BackupPanel({ isDark, classes }) {
     if (!res.canceled) {
       setBackupFolder(res.path);
       localStorage.setItem('pos_backup_folder', res.path);
+      // Persist folder path to Electron userData so it survives localStorage resets
+      await window.electronAPI.backup.saveConfig(res.path);
       // Create the folder on disk immediately and write a placeholder index
       const init = await window.electronAPI.backup.initFolder(res.path);
       if (init.success) {
         // Reload index so the UI reflects the initialized folder
         const idx = await window.electronAPI.backup.readIndex(res.path);
         if (idx.success) setBackupIndex(idx.index);
-        setStatus({ type: 'success', msg: `Backup folder ready. Offline data will auto-save here.` });
+        notify.success('Backup folder ready. Offline data will auto-save here.');
       } else {
-        setStatus({ type: 'error', msg: `Folder set but could not create it: ${init.error}` });
+        notify.error(`Folder set but could not create it: ${init.error}`);
       }
     }
   }
@@ -169,9 +177,36 @@ function BackupPanel({ isDark, classes }) {
     const res = await window.electronAPI.backup.loadFile(backupFolder + '/pos_cache.json');
     if (res.success) {
       const offlineOrders = res.data?.orders?.filter(o => !o._isSynced) || [];
-      alert(`Backup folder contains:\n• ${offlineOrders.length} offline/unsynced orders\n• ${res.data?.orders?.length || 0} total cached orders`);
+      const total = res.data?.orders?.length || 0;
+      notify.info(`Backup: ${offlineOrders.length} unsynced orders · ${total} total cached orders`);
     } else {
-      setStatus({ type: 'error', msg: 'No backup data found in this folder yet.' });
+      notify.error('No backup data found in this folder yet.');
+    }
+  }
+
+  // ── Data Recovery handlers ──
+  async function handleScanAllPorts() {
+    if (!isElectron || !window.electronAPI?.backup?.scanAllPorts) return;
+    setScanning(true);
+    setScanResult(null);
+    setImportedCount(null);
+    try {
+      const result = await window.electronAPI.backup.scanAllPorts();
+      setScanResult(result);
+    } catch (err) {
+      setScanResult({ success: false, error: err.message });
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  function handleImportRecovered() {
+    if (!scanResult?.caches?.length) return;
+    const allOrders = scanResult.caches.flatMap(c => c.unsyncedOrders);
+    const count = cacheManager.injectRecoveredOrders(allOrders);
+    setImportedCount(count);
+    if (count > 0) {
+      setTimeout(() => router.push('/offline-orders'), 1200);
     }
   }
 
@@ -298,18 +333,6 @@ function BackupPanel({ isDark, classes }) {
           </p>
         )}
 
-        {status && (
-          <div className={`mt-3 p-3 rounded-lg text-sm flex items-start gap-2 ${
-            status.type === 'success'
-              ? (isDark ? 'bg-green-900/20 text-green-400 border border-green-700' : 'bg-green-50 text-green-700 border border-green-200')
-              : (isDark ? 'bg-red-900/20 text-red-400 border border-red-700' : 'bg-red-50 text-red-700 border border-red-200')
-          }`}>
-            {status.type === 'success'
-              ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              : <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
-            <span>{status.msg}</span>
-          </div>
-        )}
       </div>
 
       {/* How it works */}
@@ -332,6 +355,184 @@ function BackupPanel({ isDark, classes }) {
           ))}
         </div>
       </div>
+
+      {/* ── Data Recovery ── */}
+      {isElectron && (
+        <div className={`${isDark ? 'bg-amber-950/30 border-amber-700/50' : 'bg-amber-50 border-amber-200'} rounded-xl border p-6`}>
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDark ? 'bg-amber-900/40' : 'bg-amber-100'}`}>
+              <Database className={`w-5 h-5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className={`text-base font-bold ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
+                  Data Recovery
+                </h3>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isDark ? 'bg-amber-900/50 text-amber-400 border border-amber-700' : 'bg-amber-100 text-amber-700 border border-amber-300'}`}>
+                  Temporary Tool
+                </span>
+              </div>
+              <p className={`text-xs mt-0.5 ${isDark ? 'text-amber-400/70' : 'text-amber-700'}`}>
+                Scans all previous app sessions stored on this device and recovers any offline orders that were never synced to the database
+              </p>
+            </div>
+          </div>
+
+          {/* Explanation */}
+          <div className={`p-3 rounded-lg mb-4 text-sm ${isDark ? 'bg-amber-900/20 text-amber-300/80' : 'bg-amber-100 text-amber-800'}`}>
+            The app was previously running on random ports which caused offline order data to become invisible on restart.
+            This tool reads a snapshot of the device&apos;s local storage database (taken at startup) and shows <strong>every order from every past session</strong> — both synced and unsynced — so you can recover anything that was lost.
+          </div>
+
+          {/* Scan button */}
+          <button
+            onClick={handleScanAllPorts}
+            disabled={scanning}
+            className={`w-full py-3 px-4 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+              scanning ? 'opacity-60 cursor-not-allowed' : ''
+            } ${isDark ? 'bg-amber-700 hover:bg-amber-600 text-white' : 'bg-amber-500 hover:bg-amber-600 text-white'}`}
+          >
+            {scanning ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                Scanning all sessions... this may take a moment
+              </>
+            ) : (
+              <>
+                <Database className="w-4 h-4" />
+                Scan Device for Lost Orders
+              </>
+            )}
+          </button>
+
+          {/* Scan results */}
+          {scanResult && (
+            <div className="mt-4">
+              {scanResult.success ? (
+                <>
+                  {/* Snapshot indicator */}
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs mb-3 ${
+                    scanResult.usedSnapshot
+                      ? (isDark ? 'bg-green-900/20 border border-green-800 text-green-400' : 'bg-green-50 border border-green-200 text-green-700')
+                      : (isDark ? 'bg-yellow-900/20 border border-yellow-800 text-yellow-400' : 'bg-yellow-50 border border-yellow-200 text-yellow-700')
+                  }`}>
+                    <div className={`w-2 h-2 rounded-full ${scanResult.usedSnapshot ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                    {scanResult.usedSnapshot
+                      ? 'Using pre-startup snapshot — most accurate, captures previous session before compaction'
+                      : 'Using live database copy — restart the app once to enable the more accurate snapshot mode'}
+                  </div>
+
+                  {/* Stats row */}
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    {[
+                      { label: 'Files Scanned', value: scanResult.filesScanned },
+                      { label: 'Sessions Found', value: scanResult.totalSessions },
+                      { label: 'Unsynced Orders', value: scanResult.totalUnsyncedOrders, highlight: scanResult.totalUnsyncedOrders > 0 },
+                    ].map(stat => (
+                      <div key={stat.label} className={`p-3 rounded-lg text-center border ${
+                        stat.highlight
+                          ? (isDark ? 'bg-orange-900/30 border-orange-700' : 'bg-orange-50 border-orange-300')
+                          : (isDark ? 'bg-gray-800/60 border-gray-700' : 'bg-white border-gray-200')
+                      }`}>
+                        <p className={`text-2xl font-bold ${stat.highlight ? (isDark ? 'text-orange-400' : 'text-orange-600') : (isDark ? 'text-white' : 'text-gray-900')}`}>
+                          {stat.value}
+                        </p>
+                        <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{stat.label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Per-session breakdown — shows ALL sessions */}
+                  {scanResult.caches?.length > 0 ? (
+                    <div className="space-y-2 mb-4 max-h-56 overflow-y-auto pr-1">
+                      {scanResult.caches.map(c => (
+                        <div key={c.port} className={`p-3 rounded-lg border ${
+                          c.unsyncedOrders.length > 0
+                            ? (isDark ? 'bg-orange-900/20 border-orange-700/50' : 'bg-orange-50 border-orange-200')
+                            : (isDark ? 'bg-gray-800/60 border-gray-700' : 'bg-white border-gray-200')
+                        }`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className={`font-mono text-xs px-2 py-0.5 rounded ${isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
+                                :{c.port}
+                              </span>
+                              {c.lastSync && (
+                                <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                                  {new Date(c.lastSync).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs">
+                              <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+                                {c.syncedOrders?.length || 0} synced
+                              </span>
+                              {c.unsyncedOrders.length > 0 && (
+                                <span className={`font-bold ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>
+                                  {c.unsyncedOrders.length} UNSYNCED
+                                </span>
+                              )}
+                              <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-700'}`}>
+                                {c.totalOrders} total
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={`p-4 rounded-lg text-center text-sm mb-4 ${isDark ? 'bg-gray-800/60 text-gray-400' : 'bg-gray-50 text-gray-500'}`}>
+                      No order data found in any past session.
+                      {!scanResult.usedSnapshot && (
+                        <p className="mt-1 text-xs">Tip: Close the app completely and reopen it, then scan again to use the more accurate snapshot mode.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Import button — only for sessions that have unsynced orders */}
+                  {scanResult.totalUnsyncedOrders > 0 && importedCount === null && (
+                    <button
+                      onClick={handleImportRecovered}
+                      className={`w-full py-3 px-4 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                        isDark ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'
+                      }`}
+                    >
+                      <UploadCloud className="w-4 h-4" />
+                      Import {scanResult.totalUnsyncedOrders} Unsynced Orders to Offline Queue &rarr;
+                    </button>
+                  )}
+
+                  {/* After import */}
+                  {importedCount !== null && (
+                    <div className={`p-4 rounded-lg text-sm flex items-center gap-3 ${
+                      importedCount > 0
+                        ? (isDark ? 'bg-green-900/30 border border-green-700 text-green-300' : 'bg-green-50 border border-green-300 text-green-700')
+                        : (isDark ? 'bg-gray-800 border border-gray-700 text-gray-400' : 'bg-gray-50 border border-gray-200 text-gray-600')
+                    }`}>
+                      <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                      <div>
+                        {importedCount > 0 ? (
+                          <>
+                            <p className="font-semibold">{importedCount} orders imported successfully!</p>
+                            <p className="text-xs mt-0.5">Redirecting to Offline Orders page — turn internet ON and click Sync to push them to Supabase.</p>
+                          </>
+                        ) : (
+                          <p className="font-semibold">All found orders were already in the current session — nothing new to import.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className={`p-4 rounded-lg text-sm flex items-start gap-2 mt-3 ${isDark ? 'bg-red-900/20 border border-red-700 text-red-400' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>Scan failed: {scanResult.error}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -341,37 +542,40 @@ export default function SettingsPage() {
   const fileInputRef = useRef(null)
   const qrFileInputRef = useRef(null)
 
-  const [user, setUser] = useState(null)
-  const [currentTheme, setCurrentTheme] = useState('light')
+  const [user, setUser] = useState(() => authManager.isLoggedIn() ? authManager.getCurrentUser() : null)
+  const [currentTheme, setCurrentTheme] = useState(() => themeManager.currentTheme || 'light')
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
   const [activeTab, setActiveTab] = useState('personal')
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isOnline, setIsOnline] = useState(true)
 
-  const [personalInfo, setPersonalInfo] = useState({
-    customer_name: '',
-    email: '',
-    store_name: '',
-    phone: '',
-    store_address: '',
-    store_logo: '',
-    qr_code: '',
-    invoice_status: 'unpaid',
-    hashtag1: '',
-    hashtag2: '',
-    show_footer_section: true,
-    show_logo_on_receipt: true,
-    show_business_name_on_receipt: true,
-    business_start_time: '10:00',
-    business_end_time: '03:00'
+  const [personalInfo, setPersonalInfo] = useState(() => {
+    const cached = profileManager.getLocalProfile()
+    return cached || {
+      customer_name: '',
+      email: '',
+      store_name: '',
+      phone: '',
+      store_address: '',
+      store_logo: '',
+      qr_code: '',
+      invoice_status: 'unpaid',
+      hashtag1: '',
+      hashtag2: '',
+      show_footer_section: true,
+      show_logo_on_receipt: true,
+      show_business_name_on_receipt: true,
+      business_start_time: '10:00',
+      business_end_time: '03:00'
+    }
   })
 
   const [tempLogo, setTempLogo] = useState(null)
-  const [logoPreview, setLogoPreview] = useState('')
+  const [logoPreview, setLogoPreview] = useState(() => profileManager.getLocalProfile()?.store_logo || '')
   const [tempQrCode, setTempQrCode] = useState(null)
-  const [qrPreview, setQrPreview] = useState('')
+  const [qrPreview, setQrPreview] = useState(() => profileManager.getLocalProfile()?.qr_code || '')
   const [validationErrors, setValidationErrors] = useState({})
 
   // Update state
@@ -394,16 +598,11 @@ export default function SettingsPage() {
       return
     }
 
-    const userData = authManager.getCurrentUser()
-    console.log('🔍 authManager.getCurrentUser:', userData)
-    setUser(userData)
-
-    // Load and apply theme
-    setCurrentTheme(themeManager.currentTheme)
+    // Apply theme (user/theme already set via lazy useState)
     themeManager.applyTheme()
 
-    // Initialize profile data
-    initializeProfileData()
+    // Refresh profile from network in background (non-blocking)
+    refreshProfileInBackground()
 
     // Monitor network status
     const handleOnline = () => setIsOnline(true)
@@ -561,13 +760,21 @@ export default function SettingsPage() {
     window.electronAPI.installUpdate()
   }
 
+  // Called on mount — silently refreshes data in background without blocking the UI
+  const refreshProfileInBackground = async () => {
+    try {
+      await fetchUserDataDirectly(true)
+    } catch (error) {
+      console.error('❌ Background profile refresh failed:', error)
+    }
+  }
+
+  // Called by the explicit refresh button — shows spinner and success/error toast
   const initializeProfileData = async () => {
     try {
       setIsLoading(true)
-      console.log('🔄 Initializing profile data in settings...')
-
-      // Always fetch directly from database to ensure we have latest hashtags
-      await fetchUserDataDirectly()
+      console.log('🔄 Refreshing profile data from server...')
+      await fetchUserDataDirectly(false)
     } catch (error) {
       console.error('❌ Error initializing profile data:', error)
       notify.error('Failed to load profile data')
@@ -576,7 +783,7 @@ export default function SettingsPage() {
     }
   }
 
-  const fetchUserDataDirectly = async () => {
+  const fetchUserDataDirectly = async (silent = false) => {
     try {
       console.log('🔄 Trying direct fetch from Supabase...')
 
@@ -628,25 +835,22 @@ export default function SettingsPage() {
         }
 
         console.log('✅ Direct fetch successful:', profileData)
-        console.log('✅ Parsed hashtag1:', profileData.hashtag1)
-        console.log('✅ Parsed hashtag2:', profileData.hashtag2)
-        console.log('✅ Parsed show_footer_section:', profileData.show_footer_section)
         setPersonalInfo(profileData)
         setLogoPreview(profileData.store_logo || '')
         setQrPreview(profileData.qr_code || '')
         profileManager.saveLocalProfile(profileData)
 
-        // Save logo locally for receipts
+        // Save logo/QR locally for receipts — run in background, don't block UI
         if (profileData.store_logo) {
-          await profileManager.saveLogoLocally(profileData.store_logo)
+          profileManager.saveLogoLocally(profileData.store_logo).catch(() => {})
         }
-
-        // Save QR code locally for receipts
         if (profileData.qr_code) {
-          await profileManager.saveQrLocally(profileData.qr_code)
+          profileManager.saveQrLocally(profileData.qr_code).catch(() => {})
         }
 
-        notify.success('Profile data loaded successfully')
+        if (!silent) {
+          notify.success('Profile data loaded successfully')
+        }
       } else {
         console.log('⚠️ No data found for user:', userEmail)
         notify.warning('No profile data found for your account')
@@ -972,7 +1176,14 @@ export default function SettingsPage() {
   const isDark = themeManager.isDark();
 
   if (isLoading) {
-    return <div className={`h-screen w-screen ${classes.background}`} />
+    return (
+      <div className={`h-screen w-screen flex items-center justify-center ${classes.background}`}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-emerald-200 border-t-emerald-500" />
+          <p className={`text-sm font-medium ${classes.textSecondary}`}>Loading settings...</p>
+        </div>
+      </div>
+    )
   }
 
   return (

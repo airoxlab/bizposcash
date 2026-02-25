@@ -456,7 +456,14 @@ function PettyCashPageContent() {
 
   if (loading) {
     const classes = themeManager.getClasses()
-    return <div className={`h-screen w-screen ${classes.background}`} />
+    return (
+      <div className={`h-screen w-screen flex items-center justify-center ${classes.background}`}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-emerald-200 border-t-emerald-500" />
+          <p className={`text-sm font-medium ${classes.textSecondary}`}>Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   if (!account) {

@@ -36,6 +36,7 @@ const { registerWhatsAppHandlers } = require('./whatsapp/whatsappHandlers');
 const { registerMarketingHandlers } = require('./marketing/marketingHandlers');
 const { registerAssetHandlers } = require('./handlers/assetHandlers');
 const { registerBackupHandlers } = require('./handlers/backupHandler');
+const { registerImageHandlers, getImageDir } = require('./handlers/imageHandler');
 
 let mainWindow;
 
@@ -118,6 +119,23 @@ function createWindow() {
     const server = http.createServer((req, res) => {
       const parsed = url.parse(req.url);
       let pathname = decodeURIComponent(parsed.pathname);
+
+      // ── Serve locally-cached product/deal images ──────────────────────
+      if (pathname.startsWith('/local-images/')) {
+        const filename = path.basename(pathname);
+        const imgPath  = path.join(getImageDir(), filename);
+        if (fs.existsSync(imgPath)) {
+          const ext   = path.extname(filename).toLowerCase();
+          const mimes = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' };
+          res.setHeader('Content-Type', mimes[ext] || 'image/jpeg');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          fs.createReadStream(imgPath).pipe(res);
+        } else {
+          res.writeHead(404); res.end('Not found');
+        }
+        return;
+      }
+
       if (pathname.endsWith('/')) pathname += 'index.html';
       if (pathname === '/') pathname = '/index.html';
 
@@ -165,14 +183,30 @@ function createWindow() {
       fs.createReadStream(file).pipe(res);
     }
 
-    server.listen(0, '127.0.0.1', () => {
+    // CRITICAL: Use a fixed port so localStorage origin stays the same across restarts.
+    // Port 0 (random) would assign a different port each time, wiping all offline orders
+    // because localStorage is scoped by origin (protocol + host + port).
+    const FIXED_PORT = 3939;
+
+    const loadAppFromServer = () => {
       const { port } = server.address();
       const urlToLoad = `http://127.0.0.1:${port}/`;
       mainWindow.loadURL(urlToLoad).catch((err) => {
         console.error('Failed to load app:', err);
         mainWindow.loadURL('data:text/plain,Failed to load app');
       });
+    };
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        log.warn(`[BizPOS] Fixed port ${FIXED_PORT} is already in use — falling back to random port. WARNING: Offline orders will NOT persist across restarts in this session.`);
+        server.listen(0, '127.0.0.1', loadAppFromServer);
+      } else {
+        log.error('[BizPOS] HTTP server error:', err.message);
+      }
     });
+
+    server.listen(FIXED_PORT, '127.0.0.1', loadAppFromServer);
   }
 
   mainWindow.once('ready-to-show', () => {
@@ -212,7 +246,41 @@ function createWindow() {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// STARTUP SNAPSHOT: Copy the LevelDB directory BEFORE creating the BrowserWindow.
+// Chromium opens (and may compact) the LevelDB when the window first loads a URL.
+// By snapshotting first, we preserve the previous session's raw .log file
+// (uncompressed write-ahead log) which contains the most recently written data.
+// The recovery tool reads this snapshot instead of the live, possibly-compacted DB.
+// ─────────────────────────────────────────────────────────────────────────────
+function snapshotLevelDB() {
+  try {
+    const leveldbPath = path.join(app.getPath('userData'), 'Local Storage', 'leveldb');
+    const snapshotPath = path.join(app.getPath('userData'), 'bizpos-recovery-snapshot');
+
+    if (!fs.existsSync(leveldbPath)) return;
+
+    // Remove old snapshot first
+    try { fs.rmSync(snapshotPath, { recursive: true }); } catch (_) {}
+    fs.mkdirSync(snapshotPath, { recursive: true });
+
+    for (const file of fs.readdirSync(leveldbPath)) {
+      if (file === 'LOCK') continue; // skip exclusive lock file
+      try {
+        fs.copyFileSync(path.join(leveldbPath, file), path.join(snapshotPath, file));
+      } catch (_) {} // skip any file we can't copy
+    }
+
+    log.info('[BizPOS] LevelDB recovery snapshot saved');
+  } catch (err) {
+    log.warn('[BizPOS] LevelDB snapshot failed:', err.message);
+  }
+}
+
 app.whenReady().then(() => {
+  // CRITICAL: snapshot BEFORE createWindow() so Chromium doesn't compact/lock the DB
+  snapshotLevelDB();
+
   createWindow();
 
   // Register all handlers
@@ -225,6 +293,7 @@ app.whenReady().then(() => {
   registerMarketingHandlers(ipcMain);
   registerAssetHandlers(ipcMain);
   registerBackupHandlers(ipcMain);
+  registerImageHandlers(ipcMain);
 
   // Update check is now manual from Settings > Updates page
   // No automatic check on startup to avoid timing issues

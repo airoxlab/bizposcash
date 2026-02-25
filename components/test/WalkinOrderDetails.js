@@ -418,8 +418,8 @@ export default function WalkinOrderDetails({
     try {
       // Prepare order data for reopening
       const orderData = {
-        cart: orderItems.map(item => ({
-        id: `${item.product_id}-${item.variant_id || 'base'}-${Date.now()}`,
+        cart: orderItems.map((item, index) => ({
+        id: `${item.product_id}-${item.variant_id || 'base'}-${Date.now()}-${index}`,
         productId: item.product_id,
         variantId: item.variant_id,
         productName: item.product_name,

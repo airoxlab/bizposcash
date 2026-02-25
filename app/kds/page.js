@@ -5,12 +5,10 @@ import {
   ArrowLeft,
   Clock,
   CheckCircle,
-  XCircle,
   AlertTriangle,
   ChefHat,
   Flame,
   Package,
-  Truck,
   Coffee,
   User,
   Phone,
@@ -49,10 +47,8 @@ import { printerManager } from '../../lib/printerManager'
 import dailySerialManager from '../../lib/utils/dailySerialManager'
 import { getTodaysBusinessDate, filterOrdersByBusinessDate, getBusinessDayRange } from '../../lib/utils/businessDayUtils'
 import { getOrderChanges, getOrderItemsWithChanges } from '../../lib/utils/orderChangesTracker'
-import ConfirmModal from '../../components/ui/ConfirmModal'
 import NotificationSystem, { notify } from '../../components/ui/NotificationSystem'
 import ProtectedPage from '../../components/ProtectedPage'
-import ConvertToDeliveryModal from '../../components/delivery/ConvertToDeliveryModal'
 
 export default function KDSPage() {
   const router = useRouter()
@@ -74,10 +70,8 @@ export default function KDSPage() {
   const [sortOrder, setSortOrder] = useState('desc') // 'asc' (old to new) or 'desc' (new to old)
   const [updatedOrderIds, setUpdatedOrderIds] = useState(new Set()) // Orders updated while in kitchen
   const [selectedOrderChanges, setSelectedOrderChanges] = useState(null) // Changes for selected order modal
-  const [confirmCancel, setConfirmCancel] = useState({ show: false, orderId: null })
-  const [isCancelling, setIsCancelling] = useState(false)
-  const [showConvertModal, setShowConvertModal] = useState(false)
   const [mounted, setMounted] = useState(false) // Tracks client-side hydration completion
+  const [orderChangesMap, setOrderChangesMap] = useState({}) // orderId → changes[] for inline display
   const audioRef = useRef(null)
   const refreshTimerRef = useRef(null)
   const lastOrderCountRef = useRef(0)
@@ -516,6 +510,11 @@ export default function KDSPage() {
 
     const sortOrders = (orders) => {
       return [...orders].sort((a, b) => {
+        // Updated orders always float to the top
+        const aUpdated = updatedOrderIds.has(a.id) ? 1 : 0
+        const bUpdated = updatedOrderIds.has(b.id) ? 1 : 0
+        if (bUpdated !== aUpdated) return bUpdated - aUpdated
+        // Then sort by date
         const dateA = new Date(a.created_at).getTime()
         const dateB = new Date(b.created_at).getTime()
         return sortOrder === 'desc' ? dateB - dateA : dateA - dateB
@@ -528,7 +527,7 @@ export default function KDSPage() {
       Ready: sortOrders(filterBySearch(allOrders.filter(o => o.order_status === 'Ready'))),
       Dispatched: sortOrders(filterBySearch(allOrders.filter(o => o.order_status === 'Dispatched'))),
     }
-  }, [allOrders, searchTerm, sortOrder])
+  }, [allOrders, searchTerm, sortOrder, updatedOrderIds])
 
   const showNotification = (title, body) => {
     if ('Notification' in window && Notification.permission === 'granted') {
@@ -655,6 +654,38 @@ export default function KDSPage() {
     return 'green' // Normal
   }
 
+  // Load changes for updated orders so they show inline on cards without clicking
+  const loadChangesForUpdatedOrders = useCallback(async (updatedIds) => {
+    if (!updatedIds || updatedIds.size === 0) return
+    const cached = JSON.parse(localStorage.getItem('order_changes') || '{}')
+    const fromCache = {}
+    const needFetch = []
+    for (const id of updatedIds) {
+      if (cached[id] && cached[id].length > 0) {
+        fromCache[id] = cached[id]
+      } else {
+        needFetch.push(id)
+      }
+    }
+    if (Object.keys(fromCache).length > 0) {
+      setOrderChangesMap(prev => ({ ...prev, ...fromCache }))
+    }
+    // Fetch uncached ones in background, one at a time to avoid rate-limiting
+    for (const id of needFetch) {
+      try {
+        const result = await getOrderChanges(id)
+        if (result.hasChanges) {
+          setOrderChangesMap(prev => ({ ...prev, [id]: result.changes }))
+        }
+      } catch (_) {}
+    }
+  }, [])
+
+  // Whenever updatedOrderIds changes, pre-fetch changes for all updated orders
+  useEffect(() => {
+    loadChangesForUpdatedOrders(updatedOrderIds)
+  }, [updatedOrderIds, loadChangesForUpdatedOrders])
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen()
@@ -669,24 +700,6 @@ export default function KDSPage() {
     const newTheme = theme === 'light' ? 'dark' : 'light'
     setTheme(newTheme)
     themeManager.setTheme(newTheme)
-  }
-
-  const handleCancelOrder = (orderId) => {
-    setConfirmCancel({ show: true, orderId })
-  }
-
-  const confirmCancelOrder = async () => {
-    setIsCancelling(true)
-    try {
-      await updateOrderStatus(confirmCancel.orderId, 'Cancelled')
-      setConfirmCancel({ show: false, orderId: null })
-      notify.success('Order cancelled successfully')
-    } catch (error) {
-      console.error('Error cancelling order:', error)
-      notify.error('Failed to cancel order')
-    } finally {
-      setIsCancelling(false)
-    }
   }
 
   // Print kitchen docket for an order
@@ -973,7 +986,9 @@ export default function KDSPage() {
   }
 
   // Status Column Component for Column View
-  const StatusColumn = ({ title, icon: Icon, status, orders, config, onOrderClick, onStatusUpdate, onPrintDocket, classes, isDark, updatedIds }) => {
+  const StatusColumn = ({ title, icon: Icon, status, orders, config, onOrderClick, onStatusUpdate, onPrintDocket, classes, isDark, updatedIds, changesMap }) => {
+    const updatedCount = updatedIds ? orders.filter(o => updatedIds.has(o.id)).length : 0
+
     return (
       <div className={`flex flex-col h-full rounded-xl ${classes.card} ${classes.border} border overflow-hidden`}>
         {/* Column Header */}
@@ -981,6 +996,12 @@ export default function KDSPage() {
           <div className="flex items-center space-x-2">
             <Icon className={`w-5 h-5 ${config.text}`} />
             <h3 className={`font-bold ${config.text}`}>{title}</h3>
+            {updatedCount > 0 && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500 text-white animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
+                {updatedCount} modified
+              </span>
+            )}
           </div>
           <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${config.badge}`}>
             {orders.length}
@@ -1000,48 +1021,49 @@ export default function KDSPage() {
               return (
               <div
                 key={order.id}
-                className={`p-2 rounded-lg cursor-pointer border hover:shadow-md relative overflow-hidden ${
+                className={`rounded-xl cursor-pointer border hover:shadow-lg transition-shadow relative overflow-hidden ${
                   isUpdated
                     ? (isDark ? 'border-orange-500 bg-orange-900/20' : 'border-orange-400 bg-orange-50')
                     : `${config.bg} ${config.border}`
                 }`}
                 onClick={() => onOrderClick(order)}
               >
-                {/* UPDATED corner ribbon */}
+                {/* UPDATED top banner */}
                 {isUpdated && (
-                  <div className="absolute top-0 right-0 z-10">
-                    <div className="bg-orange-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-bl-lg shadow-md animate-pulse tracking-wide">
-                      UPDATED
-                    </div>
+                  <div className="bg-orange-500 text-white text-[10px] font-bold px-3 py-1 flex items-center gap-1.5 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
+                    ORDER MODIFIED
                   </div>
                 )}
 
-                {/* Compact Header */}
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`font-bold text-sm ${classes.textPrimary}`}>
-                    {order.daily_serial ? `${dailySerialManager.formatSerial(order.daily_serial)} ` : ''}#{order.order_number}
-                  </span>
-                  <span className={`text-[10px] ${classes.textSecondary} ${isUpdated ? 'pr-10' : ''}`}>{getElapsedTime(order.created_at)}</span>
-                </div>
-
-                {/* Customer & Table in one line */}
-                <div className={`flex items-center gap-1 text-xs mb-1`}>
-                  <span className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase ${getOrderTypeColor(order.order_type)}`}>
-                    {order.order_type === 'takeaway' ? 'Takeaway' : order.order_type === 'delivery' ? 'Delivery' : 'Walk-in'}
-                  </span>
-                  <span className={`${classes.textPrimary} font-medium truncate`}>{order.customers?.full_name || ''}</span>
-                  {order.order_type === 'walkin' && order.tables && (
-                    <span className={`${isDark ? 'text-purple-400' : 'text-purple-600'} text-[10px]`}>
-                      • {order.tables.table_name || `T${order.tables.table_number}`}
+                <div className="p-2.5">
+                  {/* Header: serial + order number + time */}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className={`font-bold text-sm ${classes.textPrimary}`}>
+                      {order.daily_serial ? `${dailySerialManager.formatSerial(order.daily_serial)} ` : ''}#{order.order_number}
                     </span>
-                  )}
-                </div>
+                    <span className={`text-[11px] font-medium ${classes.textSecondary}`}>{getElapsedTime(order.created_at)}</span>
+                  </div>
 
-                {/* Order Items - List Format */}
-                {order.order_items && order.order_items.length > 0 && (
-                  <div className={`p-1.5 rounded ${isDark ? 'bg-gray-900/30' : 'bg-white/50'} mb-1.5`}>
-                    <div className="space-y-0.5">
-                      {order.order_items.slice(0, 5).map((item, index) => {
+                  {/* Order type + customer */}
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${getOrderTypeColor(order.order_type)}`}>
+                      {order.order_type === 'takeaway' ? 'Takeaway' : order.order_type === 'delivery' ? 'Delivery' : 'Walk-in'}
+                    </span>
+                    {order.customers?.full_name && (
+                      <span className={`text-xs ${classes.textPrimary} font-medium`}>{order.customers.full_name}</span>
+                    )}
+                    {order.order_type === 'walkin' && order.tables && (
+                      <span className={`text-xs font-semibold ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>
+                        · {order.tables.table_name || `T${order.tables.table_number}`}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Order Items */}
+                  {order.order_items && order.order_items.length > 0 && (
+                    <div className={`rounded-lg ${isDark ? 'bg-gray-900/40' : 'bg-white/70'} mb-2 divide-y ${isDark ? 'divide-gray-700/40' : 'divide-gray-100'}`}>
+                      {order.order_items.slice(0, 6).map((item, index) => {
                         let dealProducts = []
                         if (item.is_deal && item.deal_products) {
                           try {
@@ -1051,22 +1073,27 @@ export default function KDSPage() {
                           } catch (e) {}
                         }
                         return (
-                          <div key={index}>
-                            <div className={`text-xs ${classes.textPrimary} flex items-start`}>
-                              <span className="font-bold text-green-600 dark:text-green-400 w-5 flex-shrink-0">{item.quantity}x</span>
-                              <span className="truncate flex-1">
-                                {item.product_name || item.deal_name}
-                                {!item.is_deal && item.variant_name && (
-                                  <span className={`${classes.textSecondary} text-[9px]`}> ({item.variant_name})</span>
+                          <div key={index} className="px-2 py-1.5">
+                            <div className={`text-xs ${classes.textPrimary} flex items-start gap-1.5`}>
+                              <span className={`font-extrabold text-sm leading-tight min-w-[22px] ${isDark ? 'text-green-400' : 'text-green-600'}`}>{item.quantity}x</span>
+                              <div className="flex-1 min-w-0">
+                                <span className="font-semibold leading-snug">
+                                  {item.product_name || item.deal_name}
+                                </span>
+                                {item.is_deal && (
+                                  <span className={`ml-1 text-[9px] px-1 py-0.5 rounded align-middle ${isDark ? 'bg-purple-900/60 text-purple-300' : 'bg-purple-100 text-purple-600'}`}>Deal</span>
                                 )}
-                              </span>
+                                {!item.is_deal && item.variant_name && (
+                                  <span className={`ml-1 text-[10px] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{item.variant_name}</span>
+                                )}
+                              </div>
                             </div>
                             {item.is_deal && dealProducts.length > 0 && (
-                              <div className={`ml-5 pl-1 border-l-2 ${isDark ? 'border-purple-700' : 'border-purple-300'} space-y-0.5`}>
+                              <div className={`ml-8 mt-1 pl-2 border-l-2 ${isDark ? 'border-purple-700' : 'border-purple-300'} space-y-0.5`}>
                                 {dealProducts.map((dp, dpIndex) => (
-                                  <div key={dpIndex} className={`text-[9px] ${classes.textSecondary} flex gap-1`}>
-                                    <span>{dp.quantity}x {dp.name}</span>
-                                    {dp.variant && <span>— {dp.variant}</span>}
+                                  <div key={dpIndex} className={`text-[10px] ${isDark ? 'text-gray-300' : 'text-gray-600'} flex gap-1`}>
+                                    <span className="font-medium">{dp.quantity}x {dp.name}</span>
+                                    {dp.variant && <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>— {dp.variant}</span>}
                                   </div>
                                 ))}
                               </div>
@@ -1074,37 +1101,71 @@ export default function KDSPage() {
                           </div>
                         )
                       })}
-                      {order.order_items.length > 5 && (
-                        <div className={`text-xs ${classes.textSecondary} italic pl-5`}>+{order.order_items.length - 5} more items</div>
+                      {order.order_items.length > 6 && (
+                        <div className={`px-2 py-1 text-xs ${classes.textSecondary} italic`}>+{order.order_items.length - 6} more items</div>
                       )}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Action Buttons - Compact */}
-                <div className="flex gap-1">
-                  <button
-                    onClick={(e) => onPrintDocket(order, e)}
-                    className={`flex-1 py-1 rounded text-[10px] font-medium flex items-center justify-center gap-0.5 ${
-                      isDark ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                    }`}
-                  >
-                    <Printer className="w-2.5 h-2.5" />
-                    Print
-                  </button>
-                  {config.nextStatus && (
+                  {/* Inline changes section — visible on card without clicking */}
+                  {isUpdated && changesMap && changesMap[order.id] && changesMap[order.id].length > 0 && (
+                    <div className={`rounded-lg mb-2 px-2 py-1.5 ${isDark ? 'bg-orange-900/30 border border-orange-700/40' : 'bg-orange-50 border border-orange-200'}`}>
+                      <p className={`text-[9px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-orange-300' : 'text-orange-600'}`}>Changes</p>
+                      <div className="space-y-0.5">
+                        {changesMap[order.id].map((c, i) => (
+                          <div key={i} className={`text-[10px] font-medium flex items-center gap-1 flex-wrap ${
+                            c.change_type === 'added' ? (isDark ? 'text-green-400' : 'text-green-600') :
+                            c.change_type === 'removed' ? (isDark ? 'text-red-400' : 'text-red-600') :
+                            (isDark ? 'text-orange-300' : 'text-orange-600')
+                          }`}>
+                            <span className="font-bold text-[11px] w-3 shrink-0">
+                              {c.change_type === 'added' ? '+' : c.change_type === 'removed' ? '−' : '~'}
+                            </span>
+                            {c.change_type === 'added' && (
+                              <span><span className="font-bold">{c.new_quantity}x</span> {c.product_name}{c.variant_name ? ` (${c.variant_name})` : ''}</span>
+                            )}
+                            {c.change_type === 'removed' && (
+                              <span className="line-through opacity-80"><span className="font-bold">{c.old_quantity}x</span> {c.product_name}{c.variant_name ? ` (${c.variant_name})` : ''}</span>
+                            )}
+                            {c.change_type === 'quantity_changed' && (
+                              <span>
+                                {c.product_name}{c.variant_name ? ` (${c.variant_name})` : ''}{': '}
+                                <span className="line-through opacity-70">{c.old_quantity}x</span>
+                                {' → '}
+                                <span className="font-bold">{c.new_quantity}x</span>
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-1.5">
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onStatusUpdate(order.id, config.nextStatus)
-                      }}
-                      className={`flex-1 py-1 rounded text-[10px] font-medium ${
-                        isDark ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
+                      onClick={(e) => onPrintDocket(order, e)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 ${
+                        isDark ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
                       }`}
                     >
-                      {config.nextLabel}
+                      <Printer className="w-3 h-3" />
+                      Print
                     </button>
-                  )}
+                    {config.nextStatus && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onStatusUpdate(order.id, config.nextStatus)
+                        }}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold ${
+                          isDark ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
+                        }`}
+                      >
+                        {config.nextLabel}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )})
@@ -1115,7 +1176,14 @@ export default function KDSPage() {
   }
 
   if (loading) {
-    return <div className={`h-screen w-screen ${classes.background}`} />
+    return (
+      <div className={`h-screen w-screen flex items-center justify-center ${classes.background}`}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-emerald-200 border-t-emerald-500" />
+          <p className={`text-sm font-medium ${classes.textSecondary}`}>Loading kitchen display...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -1278,6 +1346,7 @@ export default function KDSPage() {
               classes={classes}
               isDark={isDark}
               updatedIds={updatedOrderIds}
+              changesMap={orderChangesMap}
             />
 
             {/* Preparing Column */}
@@ -1296,6 +1365,7 @@ export default function KDSPage() {
               classes={classes}
               isDark={isDark}
               updatedIds={updatedOrderIds}
+              changesMap={orderChangesMap}
             />
 
             {/* Ready Column */}
@@ -1314,6 +1384,7 @@ export default function KDSPage() {
               classes={classes}
               isDark={isDark}
               updatedIds={updatedOrderIds}
+              changesMap={orderChangesMap}
             />
 
             {/* Dispatched Column */}
@@ -1332,6 +1403,7 @@ export default function KDSPage() {
               classes={classes}
               isDark={isDark}
               updatedIds={updatedOrderIds}
+              changesMap={orderChangesMap}
             />
           </div>
         </div>
@@ -1543,36 +1615,15 @@ export default function KDSPage() {
                     Print Docket
                   </button>
 
-                  {/* Convert to Delivery - walkin/takeaway in Preparing or Ready */}
-                  {['walkin', 'takeaway'].includes(selectedOrder.order_type) &&
-                   ['Preparing', 'Ready'].includes(selectedOrder.order_status) && (
-                    <button
-                      onClick={() => setShowConvertModal(true)}
-                      className="px-6 py-3 rounded-xl font-semibold shadow-lg flex items-center bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white"
-                    >
-                      <Truck className="w-5 h-5 mr-2" />
-                      Convert to Delivery
-                    </button>
-                  )}
-
                   {/* Status Action Button - Only show if there's a next status */}
                   {getStatusConfig(selectedOrder.order_status).nextStatus && (
-                    <>
-                      <button
-                        onClick={() => updateOrderStatus(selectedOrder.id, getStatusConfig(selectedOrder.order_status).nextStatus)}
-                        className="flex-1 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-semibold shadow-lg"
-                      >
-                        <Check className="w-5 h-5 inline mr-2" />
-                        {getStatusConfig(selectedOrder.order_status).nextLabel}
-                      </button>
-                      <button
-                        onClick={() => handleCancelOrder(selectedOrder.id)}
-                        className="px-6 py-3 rounded-xl bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold shadow-lg"
-                      >
-                        <XCircle className="w-5 h-5 inline mr-2" />
-                        Cancel
-                      </button>
-                    </>
+                    <button
+                      onClick={() => updateOrderStatus(selectedOrder.id, getStatusConfig(selectedOrder.order_status).nextStatus)}
+                      className="flex-1 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-semibold shadow-lg"
+                    >
+                      <Check className="w-5 h-5 inline mr-2" />
+                      {getStatusConfig(selectedOrder.order_status).nextLabel}
+                    </button>
                   )}
                 </div>
               </div>
@@ -1580,42 +1631,6 @@ export default function KDSPage() {
           </div>
         )}
 
-      {/* Confirm Cancel Modal */}
-      <ConfirmModal
-        isOpen={confirmCancel.show}
-        onClose={() => setConfirmCancel({ show: false, orderId: null })}
-        onConfirm={confirmCancelOrder}
-        title="Cancel Order"
-        message="Are you sure you want to cancel this order? This action cannot be undone."
-        confirmText="Cancel Order"
-        cancelText="Keep Order"
-        type="danger"
-        isLoading={isCancelling}
-      />
-
-      {/* Convert to Delivery Modal */}
-      {selectedOrder && (
-        <ConvertToDeliveryModal
-          isOpen={showConvertModal}
-          onClose={() => setShowConvertModal(false)}
-          order={selectedOrder}
-          onSuccess={() => {
-            const convertedId = selectedOrder.id
-            // Immediately update local state so the card reflects the new type
-            setAllOrders(prev => prev.map(o =>
-              o.id === convertedId ? { ...o, order_type: 'delivery' } : o
-            ))
-            // Close both modals
-            setShowConvertModal(false)
-            setSelectedOrder(null)
-            setOrderItems([])
-            setSelectedOrderChanges(null)
-            notify.success('Order converted to delivery successfully')
-            // Reload from server to fully sync
-            setTimeout(() => loadOrders(true, user?.id), 800)
-          }}
-        />
-      )}
 
       {/* Notification System */}
       <NotificationSystem />

@@ -84,6 +84,13 @@ const api = {
     getCustomers: (userId) => ipcRenderer.invoke('marketing-get-customers', userId)
   },
   
+  // Product / deal image caching — downloads images to userData/product-images/
+  // so they display correctly when offline.
+  images: {
+    downloadAll: (items) => ipcRenderer.invoke('images:download-all', items),
+    clearAll:    ()      => ipcRenderer.invoke('images:clear-all'),
+  },
+
   // Backup & Recovery (offline-only — auto-saves whenever offline data is cached)
   backup: {
     selectFolder: () => ipcRenderer.invoke('backup:select-folder'),
@@ -92,6 +99,12 @@ const api = {
     readIndex: (folderPath) => ipcRenderer.invoke('backup:read-index', { folderPath }),
     loadFile: (filePath) => ipcRenderer.invoke('backup:load-file', { filePath }),
     defaultPath: () => ipcRenderer.invoke('backup:default-path'),
+    // Config persistence — survives localStorage wipes
+    saveConfig: (folderPath) => ipcRenderer.invoke('backup:save-config', { folderPath }),
+    loadConfig: () => ipcRenderer.invoke('backup:load-config'),
+    restoreFromFolder: (folderPath) => ipcRenderer.invoke('backup:restore-from-folder', { folderPath }),
+    // Data Recovery — scan all past localStorage port origins in Chromium's LevelDB
+    scanAllPorts: () => ipcRenderer.invoke('backup:scan-all-ports'),
   },
 
   platform: process.platform,
