@@ -55,6 +55,7 @@ import Modal from "../../components/ui/Modal";
 import ProtectedPage from "../../components/ProtectedPage";
 import InlinePaymentSection from "../../components/pos/InlinePaymentSection";
 import SplitPaymentModal from "../../components/pos/SplitPaymentModal";
+import ConvertToDeliveryModal from "../../components/delivery/ConvertToDeliveryModal";
 import NotificationSystem, { notify } from "../../components/ui/NotificationSystem";
 import { getOrderItemsWithChanges } from '../../lib/utils/orderChangesTracker';
 
@@ -201,6 +202,7 @@ export default function OrdersPage() {
   const [showPaymentView, setShowPaymentView] = useState(false);
   const [showSplitPaymentModal, setShowSplitPaymentModal] = useState(false);
   const [splitPaymentOrder, setSplitPaymentOrder] = useState(null);
+  const [showConvertToDeliveryModal, setShowConvertToDeliveryModal] = useState(false);
 
   const cancellationReasons = [
     "Customer requested cancellation",
@@ -1052,6 +1054,32 @@ export default function OrdersPage() {
       }
 
       notify.error(errorMessage);
+    }
+  };
+
+  // Move a completed order to a different order type (walkin ↔ takeaway ↔ delivery)
+  const handleMoveOrderType = async (targetType) => {
+    if (!selectedOrder) return;
+    try {
+      const result = await cacheManager.updateOrderStatus(
+        selectedOrder.id,
+        selectedOrder.order_status,
+        {
+          order_type: targetType,
+          // Clear delivery-specific fields when moving away from delivery
+          ...(targetType !== 'delivery' ? {
+            delivery_address: null,
+            delivery_charges: 0,
+            delivery_boy_id: null,
+            delivery_time: null,
+          } : {}),
+        }
+      );
+      if (!result.success) throw new Error('Failed to move order');
+      notify.success(`Order moved to ${targetType} successfully!`);
+      fetchOrders();
+    } catch (err) {
+      notify.error(`Failed to move order: ${err.message}`);
     }
   };
 
@@ -2328,6 +2356,83 @@ export default function OrdersPage() {
                       <CheckCircle className="w-3.5 h-3.5" />
                       <span>Complete</span>
                     </motion.button>
+                  )}
+
+                  {/* Order type conversion buttons — only for Completed orders */}
+                  {selectedOrder.order_status === 'Completed' && (
+                    <>
+                      {/* Walkin order: move to Takeaway or Delivery */}
+                      {selectedOrder.order_type === 'walkin' && (
+                        <>
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleMoveOrderType('takeaway')}
+                            className="flex items-center space-x-1.5 px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-all font-medium text-sm"
+                          >
+                            <Coffee className="w-3.5 h-3.5" />
+                            <span>Move to Takeaway</span>
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => setShowConvertToDeliveryModal(true)}
+                            className="flex items-center space-x-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all font-medium text-sm"
+                          >
+                            <Truck className="w-3.5 h-3.5" />
+                            <span>Move to Delivery</span>
+                          </motion.button>
+                        </>
+                      )}
+
+                      {/* Takeaway order: move to Walkin or Delivery */}
+                      {selectedOrder.order_type === 'takeaway' && (
+                        <>
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleMoveOrderType('walkin')}
+                            className="flex items-center space-x-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-all font-medium text-sm"
+                          >
+                            <Table2 className="w-3.5 h-3.5" />
+                            <span>Move to Walkin</span>
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => setShowConvertToDeliveryModal(true)}
+                            className="flex items-center space-x-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all font-medium text-sm"
+                          >
+                            <Truck className="w-3.5 h-3.5" />
+                            <span>Move to Delivery</span>
+                          </motion.button>
+                        </>
+                      )}
+
+                      {/* Delivery order: move to Walkin or Takeaway */}
+                      {selectedOrder.order_type === 'delivery' && (
+                        <>
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleMoveOrderType('walkin')}
+                            className="flex items-center space-x-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-all font-medium text-sm"
+                          >
+                            <Table2 className="w-3.5 h-3.5" />
+                            <span>Move to Walkin</span>
+                          </motion.button>
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleMoveOrderType('takeaway')}
+                            className="flex items-center space-x-1.5 px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-all font-medium text-sm"
+                          >
+                            <Coffee className="w-3.5 h-3.5" />
+                            <span>Move to Takeaway</span>
+                          </motion.button>
+                        </>
+                      )}
+                    </>
                   )}
 
                   {/* Actions Menu */}
@@ -3675,6 +3780,20 @@ export default function OrdersPage() {
           }}
           isDark={theme === 'dark'}
           classes={themeClasses}
+        />
+      )}
+
+      {/* Move to Delivery Modal */}
+      {showConvertToDeliveryModal && selectedOrder && (
+        <ConvertToDeliveryModal
+          isOpen={showConvertToDeliveryModal}
+          onClose={() => setShowConvertToDeliveryModal(false)}
+          order={selectedOrder}
+          onSuccess={() => {
+            setShowConvertToDeliveryModal(false);
+            notify.success('Order moved to delivery successfully!');
+            fetchOrders();
+          }}
         />
       )}
 
