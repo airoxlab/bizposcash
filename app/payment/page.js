@@ -451,13 +451,14 @@ const processOrder = async () => {
           variant_id: null,
           product_name: item.dealName,
           variant_name: null,
-          base_price: item.baseDealPrice || item.finalPrice, // Store original deal price
-          variant_price: item.priceAdjustment || 0, // Store the variant adjustment
-          final_price: item.finalPrice, // Store adjusted final price
+          base_price: item.baseDealPrice || item.finalPrice,
+          variant_price: item.priceAdjustment || 0,
+          final_price: item.finalPrice,
           quantity: item.quantity,
           total_price: item.totalPrice,
           is_deal: true,
-          deal_products: JSON.stringify(item.dealProducts) // Store deal products as JSON with variant details
+          deal_products: JSON.stringify(item.dealProducts),
+          item_instructions: item.itemInstructions || null
         }
       } else {
         // Handle regular product items
@@ -471,7 +472,8 @@ const processOrder = async () => {
           final_price: item.finalPrice,
           quantity: item.quantity,
           total_price: item.totalPrice,
-          is_deal: false
+          is_deal: false,
+          item_instructions: item.itemInstructions || null
         }
       }
     })
@@ -1092,7 +1094,8 @@ const handlePrintKitchenToken = async () => {
       quantity: item.quantity,
       notes: item.notes || '',
       isDeal: item.isDeal || false,
-      dealProducts: item.isDeal ? item.dealProducts : null
+      dealProducts: item.isDeal ? item.dealProducts : null,
+      instructions: item.itemInstructions || ''
     })) || []
 
     // 🆕 Check for order changes

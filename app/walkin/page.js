@@ -635,6 +635,12 @@ export default function WalkInPage() {
     // Removed toast notification - too many notifications
   }
 
+  const updateItemInstruction = (itemId, instruction) => {
+    setCart(prev => prev.map(item =>
+      item.id === itemId ? { ...item, itemInstructions: instruction } : item
+    ))
+  }
+
   const calculateSubtotal = () => {
     return cart.reduce((sum, item) => sum + item.totalPrice, 0)
   }
@@ -2136,14 +2142,17 @@ export default function WalkInPage() {
         return
       }
 
-      // Fetch order items if not available
-      let orderItems = order.order_items || []
-      if (!orderItems.length && order.id) {
-        const { data } = await cacheManager.supabase
+      // Always fetch fresh order items from Supabase when online (ensures item_instructions is included)
+      let orderItems = []
+      if (order.id && navigator.onLine) {
+        const { data } = await supabase
           .from('order_items')
           .select('*')
           .eq('order_id', order.id)
         orderItems = data || []
+      }
+      if (!orderItems.length) {
+        orderItems = order.order_items || order.items || []
       }
 
       // Prepare order data for kitchen token
@@ -2167,7 +2176,8 @@ export default function WalkInPage() {
             productId: item.product_id,
             variantId: item.variant_id,
             productName: item.product_name,
-            variantName: item.variant_name
+            variantName: item.variant_name,
+            instructions: item.item_instructions || ''
           }
         }
         return {
@@ -2178,7 +2188,8 @@ export default function WalkInPage() {
           productId: item.product_id,
           variantId: item.variant_id,
           productName: item.product_name,
-          variantName: item.variant_name
+          variantName: item.variant_name,
+          instructions: item.item_instructions || ''
         }
       })
 
@@ -2581,6 +2592,7 @@ export default function WalkInPage() {
         selectedTable={selectedTable}
         onChangeTable={() => setCurrentView('tables')}
         onInstructionsChange={setOrderInstructions}
+        onUpdateItemInstruction={updateItemInstruction}
       />
 
       {/* Customer Form */}

@@ -475,6 +475,12 @@ export default function DeliveryPage() {
     toast.success('Cart cleared', { duration: 1000 })
   }
 
+  const updateItemInstruction = (itemId, instruction) => {
+    setCart(prev => prev.map(item =>
+      item.id === itemId ? { ...item, itemInstructions: instruction } : item
+    ))
+  }
+
   const calculateSubtotal = () => {
     return cart.reduce((sum, item) => sum + item.totalPrice, 0)
   }
@@ -1737,17 +1743,17 @@ export default function DeliveryPage() {
         return
       }
 
-      // Fetch order items if not already available
-      let orderItems = order.items || order.order_items || []
-      if (orderItems.length === 0 && order.id) {
-        const { data: items, error } = await cacheManager.supabase
+      // Always fetch fresh order items from Supabase when online (ensures item_instructions is included)
+      let orderItems = []
+      if (order.id && navigator.onLine) {
+        const { data: items, error } = await supabase
           .from('order_items')
           .select('*')
           .eq('order_id', order.id)
-
-        if (!error && items) {
-          orderItems = items
-        }
+        if (!error && items) orderItems = items
+      }
+      if (!orderItems.length) {
+        orderItems = order.items || order.order_items || []
       }
 
       let mappedItems = orderItems.map((item) => {
@@ -1772,7 +1778,8 @@ export default function DeliveryPage() {
             productId: item.product_id,
             variantId: item.variant_id,
             productName: item.product_name,
-            variantName: item.variant_name
+            variantName: item.variant_name,
+            instructions: item.item_instructions || ''
           }
         }
         return {
@@ -1784,7 +1791,8 @@ export default function DeliveryPage() {
           productId: item.product_id,
           variantId: item.variant_id,
           productName: item.product_name,
-          variantName: item.variant_name
+          variantName: item.variant_name,
+          instructions: item.item_instructions || ''
         }
       })
 
@@ -2151,6 +2159,16 @@ export default function DeliveryPage() {
           onComplete={handleCompleteAlreadyPaidOrder}
           onPaymentRequired={handlePaymentRequired}
           orderType="delivery"
+          onConvertToDelivery={() => {
+            setOrdersRefreshTrigger(prev => prev + 1)
+            setSelectedOrder(null)
+            setCurrentView('products')
+            notify.success('Order converted successfully!')
+          }}
+          onClose={() => {
+            setSelectedOrder(null)
+            setCurrentView('products')
+          }}
         />
       )}
 
@@ -2170,6 +2188,7 @@ export default function DeliveryPage() {
         networkStatus={networkStatus}
         orderType="delivery"
         isReopenedOrder={isReopenedOrder}
+        onUpdateItemInstruction={updateItemInstruction}
       />
 
       <DeliveryCustomerForm

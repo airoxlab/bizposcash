@@ -26,6 +26,19 @@ const ProductGrid = forwardRef(({
     searchInputRef.current?.focus()
   }, [])
 
+  // Fast scroll — multiply wheel delta so the list scrolls further per notch
+  useEffect(() => {
+    const el = gridContainerRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      if (e.deltaY === 0) return
+      e.preventDefault()
+      el.scrollTop += e.deltaY * 2.5
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
   // Memoize category→products mapping so it's not recomputed on every render
   const productsByCategory = useMemo(() => {
     const map = {}

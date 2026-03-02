@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
@@ -22,7 +22,8 @@ import {
   Plus,
   X,
   RefreshCw,
-  CreditCard
+  CreditCard,
+  Table2
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { authManager } from '../../lib/authManager'
@@ -30,6 +31,7 @@ import { usePermissions } from '../../lib/permissionManager'
 import dailySerialManager from '../../lib/utils/dailySerialManager'
 import InlinePaymentSection from '../pos/InlinePaymentSection'
 import ConvertToDeliveryModal from '../delivery/ConvertToDeliveryModal'
+import ConvertToTakeawayModal from '../delivery/ConvertToTakeawayModal'
 import { cacheManager } from '../../lib/cacheManager'
 import { useRouter } from 'next/navigation'
 
@@ -51,6 +53,7 @@ export default function WalkinOrderDetails({
   const [loading, setLoading] = useState(true)
   const [showPaymentView, setShowPaymentView] = useState(false)
   const [showConvertModal, setShowConvertModal] = useState(false)
+  const [showConvertToTakeawayModal, setShowConvertToTakeawayModal] = useState(false)
   const [loyaltyRedemption, setLoyaltyRedemption] = useState(null)
   const [paymentTransactions, setPaymentTransactions] = useState([])
   const [showCancelModal, setShowCancelModal] = useState(false)
@@ -58,6 +61,20 @@ export default function WalkinOrderDetails({
   const [customCancelReason, setCustomCancelReason] = useState('')
   const router = useRouter()
   const permissions = usePermissions()
+  const contentRef = useRef(null)
+
+  // Fast scroll — multiply wheel delta so the content scrolls further per notch
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      if (e.deltaY === 0) return
+      e.preventDefault()
+      el.scrollTop += e.deltaY * 2.5
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   useEffect(() => {
     if (order?.id) {
@@ -76,13 +93,23 @@ export default function WalkinOrderDetails({
       const cachedItems = order.items || order.order_items
 
       if (cachedItems && cachedItems.length > 0) {
-        // Use cached items (works offline)
+        // Use cached items immediately (works offline / fast display)
         console.log('Using cached order items:', cachedItems.length)
         setOrderItems(cachedItems)
 
         // Try to fetch history and loyalty if online
         if (navigator.onLine) {
           try {
+            // Always fetch fresh items from Supabase to get complete data (e.g. item_instructions)
+            const { data: freshItems } = await supabase
+              .from('order_items')
+              .select('*')
+              .eq('order_id', order.id)
+              .order('created_at')
+            if (freshItems && freshItems.length > 0) {
+              setOrderItems(freshItems)
+            }
+
             const history = await authManager.getOrderHistory(order.id)
             setOrderHistory(history || [])
 
@@ -404,6 +431,29 @@ export default function WalkinOrderDetails({
     }
   }
 
+  // Convert to walkin directly (no form needed)
+  const handleConvertToWalkin = async () => {
+    try {
+      const additionalData = {
+        order_type: 'walkin',
+        delivery_address: null,
+        delivery_charges: 0,
+        delivery_boy_id: null,
+        delivery_time: null,
+      }
+      if (orderType === 'delivery') {
+        const charges = parseFloat(order.delivery_charges) || 0
+        additionalData.total_amount = Math.max(0, (parseFloat(order.total_amount) || 0) - charges)
+      }
+      const result = await cacheManager.updateOrderStatus(order.id, order.order_status, additionalData)
+      if (!result.success) throw new Error('Failed to convert order')
+      onConvertToDelivery?.()
+      onClose?.()
+    } catch (err) {
+      toast.error('Failed to convert: ' + err.message)
+    }
+  }
+
   // Reopen order handler
   const handleReopenOrder = () => {
     console.log('🔄 Reopening order:', order)
@@ -433,7 +483,8 @@ export default function WalkinOrderDetails({
         dealId: item.deal_id,
         dealName: item.is_deal ? item.product_name : null,
         dealProducts: item.is_deal && item.deal_products ?
-          (typeof item.deal_products === 'string' ? JSON.parse(item.deal_products) : item.deal_products) : null
+          (typeof item.deal_products === 'string' ? JSON.parse(item.deal_products) : item.deal_products) : null,
+        itemInstructions: item.item_instructions || null
       })),
       customer: order.customers,
       orderInstructions: order.order_instructions || '',
@@ -571,9 +622,9 @@ export default function WalkinOrderDetails({
     <div className={`flex-1 flex flex-col ${isDark ? 'bg-gray-900' : 'bg-gray-50'} overflow-hidden`}>
       {/* Header */}
       <div className={`${classes.card} ${classes.shadow} shadow-sm ${classes.border} border-b p-3`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-lg ${isDark ? 'bg-blue-900/30' : 'bg-blue-100'} flex items-center justify-center`}>
+        <div className="flex items-center justify-between gap-2 overflow-hidden">
+          <div className="flex items-center gap-2 min-w-0 shrink">
+            <div className={`w-7 h-7 rounded-lg shrink-0 ${isDark ? 'bg-blue-900/30' : 'bg-blue-100'} flex items-center justify-center`}>
               <Coffee className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
             </div>
             <div>
@@ -592,103 +643,98 @@ export default function WalkinOrderDetails({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-1.5">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+          <div className="flex items-center gap-0.5 flex-nowrap shrink-0 overflow-hidden">
+            <button
               onClick={() => onPrint?.(order, loyaltyRedemption)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors text-xs"
+              className="flex items-center gap-1 px-1.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
             >
               <Printer className="w-3 h-3" />
               Print
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+            </button>
+            <button
               onClick={() => onPrintToken?.(order, loyaltyRedemption)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-md transition-colors text-xs"
+              className="flex items-center gap-1 px-1.5 py-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
             >
               <Printer className="w-3 h-3" />
-              Print Token
-            </motion.button>
-            {order.order_status === 'Preparing' && (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => onMarkReady?.(order)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors text-xs"
-              >
-                <ChefHat className="w-3 h-3" />
-                Mark Ready
-              </motion.button>
-            )}
-            {/* Convert to Delivery button - show for walkin/takeaway in Pending, Preparing, Ready */}
-            {['walkin', 'takeaway'].includes(orderType) &&
-             ['Pending', 'Preparing', 'Ready'].includes(order.order_status) && (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => setShowConvertModal(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors text-xs"
-              >
-                <Truck className="w-3 h-3" />
-                Convert to Delivery
-              </motion.button>
+              Token
+            </button>
+            {/* Order type conversion buttons — Pending/Preparing/Ready only */}
+            {['Pending', 'Preparing', 'Ready'].includes(order.order_status) && (
+              <>
+                {orderType !== 'walkin' && (
+                  <button
+                    onClick={handleConvertToWalkin}
+                    className="flex items-center gap-1 px-1.5 py-1.5 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                  >
+                    <Table2 className="w-3 h-3" />
+                    Walkin
+                  </button>
+                )}
+                {orderType !== 'takeaway' && (
+                  <button
+                    onClick={() => setShowConvertToTakeawayModal(true)}
+                    className="flex items-center gap-1 px-1.5 py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                  >
+                    <Coffee className="w-3 h-3" />
+                    Takeaway
+                  </button>
+                )}
+                {orderType !== 'delivery' && (
+                  <button
+                    onClick={() => setShowConvertModal(true)}
+                    className="flex items-center gap-1 px-1.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
+                  >
+                    <Truck className="w-3 h-3" />
+                    Delivery
+                  </button>
+                )}
+              </>
             )}
             {/* Reopen button - with permission check */}
             {permissions.hasPermission('REOPEN_ORDER') && (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+              <button
                 onClick={handleReopenOrder}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors text-xs"
+                className="flex items-center gap-1 px-1.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
               >
                 <RotateCcw className="w-3 h-3" />
                 Reopen
-              </motion.button>
+              </button>
             )}
             {/* Cancel button - with permission check */}
             {permissions.hasPermission('CANCEL_ORDER') && (
-              <motion.button
-                whileHover={{ scale: order.order_status === 'Cancelled' ? 1 : 1.02 }}
-                whileTap={{ scale: order.order_status === 'Cancelled' ? 1 : 0.98 }}
+              <button
                 onClick={handleCancelOrder}
                 disabled={order.order_status === 'Cancelled'}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors text-xs ${
+                className={`flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-colors text-xs font-medium whitespace-nowrap ${
                   order.order_status === 'Cancelled'
                     ? 'bg-gray-400 cursor-not-allowed opacity-50'
-                    : 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-red-600 hover:bg-red-700 active:bg-red-800 text-white'
                 }`}
               >
                 <XCircle className="w-3 h-3" />
                 Cancel
-              </motion.button>
+              </button>
             )}
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+            <button
               onClick={() => {
-                // Check if payment is pending/unpaid
-                // BUT: If payment_method is 'Account', complete directly (customer ledger, no payment needed)
                 const needsPayment = order.payment_status === 'Pending' && order.payment_method !== 'Account'
-
                 if (needsPayment) {
                   setShowPaymentView(true)
                 } else {
                   onComplete?.(order)
                 }
               }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors text-xs"
+              className="flex items-center gap-1 px-1.5 py-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
             >
               <Check className="w-3 h-3" />
               Complete
-            </motion.button>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-3" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      <div ref={contentRef} className="flex-1 overflow-y-auto p-3" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
         <style jsx>{`
           div::-webkit-scrollbar {
             display: none;
@@ -1065,6 +1111,18 @@ export default function WalkinOrderDetails({
         order={order}
         onSuccess={() => {
           setShowConvertModal(false)
+          onConvertToDelivery?.()
+          onClose?.()
+        }}
+      />
+
+      {/* Convert to Takeaway Modal */}
+      <ConvertToTakeawayModal
+        isOpen={showConvertToTakeawayModal}
+        onClose={() => setShowConvertToTakeawayModal(false)}
+        order={order}
+        onSuccess={() => {
+          setShowConvertToTakeawayModal(false)
           onConvertToDelivery?.()
           onClose?.()
         }}

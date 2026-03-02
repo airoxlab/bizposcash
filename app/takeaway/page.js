@@ -452,6 +452,12 @@ export default function TakeawayPage() {
     toast.success('Cart cleared', { duration: 1000 })
   }
 
+  const updateItemInstruction = (itemId, instruction) => {
+    setCart(prev => prev.map(item =>
+      item.id === itemId ? { ...item, itemInstructions: instruction } : item
+    ))
+  }
+
   const calculateSubtotal = () => {
     return cart.reduce((sum, item) => sum + item.totalPrice, 0)
   }
@@ -1712,17 +1718,17 @@ export default function TakeawayPage() {
         return
       }
 
-      // Fetch order items if not already available
-      let orderItems = order.items || order.order_items || []
-      if (orderItems.length === 0 && order.id) {
-        const { data: items, error } = await cacheManager.supabase
+      // Always fetch fresh order items from Supabase when online (ensures item_instructions is included)
+      let orderItems = []
+      if (order.id && navigator.onLine) {
+        const { data: items, error } = await supabase
           .from('order_items')
           .select('*')
           .eq('order_id', order.id)
-
-        if (!error && items) {
-          orderItems = items
-        }
+        if (!error && items) orderItems = items
+      }
+      if (!orderItems.length) {
+        orderItems = order.items || order.order_items || []
       }
 
       let mappedItems = orderItems.map((item) => {
@@ -1747,7 +1753,8 @@ export default function TakeawayPage() {
             productId: item.product_id,
             variantId: item.variant_id,
             productName: item.product_name,
-            variantName: item.variant_name
+            variantName: item.variant_name,
+            instructions: item.item_instructions || ''
           }
         }
         return {
@@ -1759,7 +1766,8 @@ export default function TakeawayPage() {
           productId: item.product_id,
           variantId: item.variant_id,
           productName: item.product_name,
-          variantName: item.variant_name
+          variantName: item.variant_name,
+          instructions: item.item_instructions || ''
         }
       })
 
@@ -2106,11 +2114,14 @@ export default function TakeawayPage() {
           onPaymentRequired={handlePaymentRequired}
           orderType="takeaway"
           onConvertToDelivery={() => {
-            // Refresh orders list and close order details after conversion
             setOrdersRefreshTrigger(prev => prev + 1)
             setSelectedOrder(null)
             setCurrentView('products')
-            notify.success('Order converted to delivery! Check the delivery page.')
+            notify.success('Order converted successfully!')
+          }}
+          onClose={() => {
+            setSelectedOrder(null)
+            setCurrentView('products')
           }}
         />
       )}
@@ -2131,6 +2142,7 @@ export default function TakeawayPage() {
         networkStatus={networkStatus}
         orderType="takeaway"
         isReopenedOrder={isReopenedOrder}
+        onUpdateItemInstruction={updateItemInstruction}
       />
 
       <TakeawayCustomerForm

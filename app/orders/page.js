@@ -56,6 +56,7 @@ import ProtectedPage from "../../components/ProtectedPage";
 import InlinePaymentSection from "../../components/pos/InlinePaymentSection";
 import SplitPaymentModal from "../../components/pos/SplitPaymentModal";
 import ConvertToDeliveryModal from "../../components/delivery/ConvertToDeliveryModal";
+import ConvertToTakeawayModal from "../../components/delivery/ConvertToTakeawayModal";
 import NotificationSystem, { notify } from "../../components/ui/NotificationSystem";
 import { getOrderItemsWithChanges } from '../../lib/utils/orderChangesTracker';
 
@@ -203,6 +204,7 @@ export default function OrdersPage() {
   const [showSplitPaymentModal, setShowSplitPaymentModal] = useState(false);
   const [splitPaymentOrder, setSplitPaymentOrder] = useState(null);
   const [showConvertToDeliveryModal, setShowConvertToDeliveryModal] = useState(false);
+  const [showConvertToTakeawayModal, setShowConvertToTakeawayModal] = useState(false);
 
   const cancellationReasons = [
     "Customer requested cancellation",
@@ -628,6 +630,12 @@ export default function OrdersPage() {
         setSelectedOrder(filteredOrders[0]);
         await fetchOrderItems(filteredOrders[0].id);
         await fetchOrderHistory(filteredOrders[0].id);
+      } else if (selectedOrder) {
+        // Sync the selected order with the latest data from the server
+        const refreshed = filteredOrders.find(o => o.id === selectedOrder.id);
+        if (refreshed) {
+          setSelectedOrder(refreshed);
+        }
       }
 
       setLoading(false);
@@ -1061,21 +1069,26 @@ export default function OrdersPage() {
   const handleMoveOrderType = async (targetType) => {
     if (!selectedOrder) return;
     try {
+      const additionalData = { order_type: targetType };
+
+      // Moving away from delivery: clear delivery fields and subtract delivery charges from total
+      if (targetType !== 'delivery' && selectedOrder.order_type === 'delivery') {
+        const deliveryCharges = parseFloat(selectedOrder.delivery_charges) || 0;
+        additionalData.delivery_address = null;
+        additionalData.delivery_charges = 0;
+        additionalData.delivery_boy_id = null;
+        additionalData.delivery_time = null;
+        additionalData.total_amount = Math.max(0, (parseFloat(selectedOrder.total_amount) || 0) - deliveryCharges);
+      }
+
       const result = await cacheManager.updateOrderStatus(
         selectedOrder.id,
         selectedOrder.order_status,
-        {
-          order_type: targetType,
-          // Clear delivery-specific fields when moving away from delivery
-          ...(targetType !== 'delivery' ? {
-            delivery_address: null,
-            delivery_charges: 0,
-            delivery_boy_id: null,
-            delivery_time: null,
-          } : {}),
-        }
+        additionalData
       );
       if (!result.success) throw new Error('Failed to move order');
+      // Optimistically update selectedOrder so UI reflects the change immediately
+      setSelectedOrder(prev => prev ? { ...prev, ...additionalData } : prev);
       notify.success(`Order moved to ${targetType} successfully!`);
       fetchOrders();
     } catch (err) {
@@ -1662,7 +1675,8 @@ export default function OrdersPage() {
             productId: item.product_id,
             variantId: item.variant_id,
             productName: item.product_name,
-            variantName: item.variant_name
+            variantName: item.variant_name,
+            instructions: item.item_instructions || ''
           };
         }
         // Handle regular items
@@ -1675,7 +1689,8 @@ export default function OrdersPage() {
           productId: item.product_id,
           variantId: item.variant_id,
           productName: item.product_name,
-          variantName: item.variant_name
+          variantName: item.variant_name,
+          instructions: item.item_instructions || ''
         };
       })
 
@@ -2367,7 +2382,7 @@ export default function OrdersPage() {
                           <motion.button
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
-                            onClick={() => handleMoveOrderType('takeaway')}
+                            onClick={() => setShowConvertToTakeawayModal(true)}
                             className="flex items-center space-x-1.5 px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-all font-medium text-sm"
                           >
                             <Coffee className="w-3.5 h-3.5" />
@@ -2424,7 +2439,7 @@ export default function OrdersPage() {
                           <motion.button
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
-                            onClick={() => handleMoveOrderType('takeaway')}
+                            onClick={() => setShowConvertToTakeawayModal(true)}
                             className="flex items-center space-x-1.5 px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-all font-medium text-sm"
                           >
                             <Coffee className="w-3.5 h-3.5" />
@@ -3791,11 +3806,28 @@ export default function OrdersPage() {
           order={selectedOrder}
           onSuccess={() => {
             setShowConvertToDeliveryModal(false);
+            setSelectedOrder(prev => prev ? { ...prev, order_type: 'delivery' } : prev);
             notify.success('Order moved to delivery successfully!');
             fetchOrders();
           }}
         />
       )}
+
+      {/* Move to Takeaway Modal */}
+      {showConvertToTakeawayModal && selectedOrder && (
+        <ConvertToTakeawayModal
+          isOpen={showConvertToTakeawayModal}
+          onClose={() => setShowConvertToTakeawayModal(false)}
+          order={selectedOrder}
+          onSuccess={() => {
+            setShowConvertToTakeawayModal(false);
+            setSelectedOrder(prev => prev ? { ...prev, order_type: 'takeaway', delivery_charges: 0, delivery_address: null, delivery_boy_id: null } : prev);
+            notify.success('Order moved to takeaway successfully!');
+            fetchOrders();
+          }}
+        />
+      )}
+
 
       {/* Notification System */}
       <NotificationSystem />

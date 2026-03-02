@@ -116,6 +116,9 @@ async function printKitchenToken(ip, port, orderData, userProfile) {
                 await printer.println(productLine);
               }
             }
+            if (item.instructions) {
+              await printer.println(`  * ${item.instructions}`);
+            }
           } else {
             let itemName = item.name;
             if (item.size) itemName = `${item.name} (${item.size})`;
@@ -132,6 +135,9 @@ async function printKitchenToken(ip, port, orderData, userProfile) {
               await printer.leftRight(`- ${itemName}`, item.quantity.toString());
             } else {
               await printer.leftRight(itemName, item.quantity.toString());
+            }
+            if (item.instructions) {
+              await printer.println(`  * ${item.instructions}`);
             }
           }
         }

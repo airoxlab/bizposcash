@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { User, ShoppingCart, Plus, Minus, Trash2, WifiOff, Edit3, Gift, X, Sun, Moon, Wifi, AlertCircle, Table2, FileText, Check } from 'lucide-react'
+import { User, ShoppingCart, Plus, Minus, Trash2, WifiOff, Edit3, Gift, X, Sun, Moon, Wifi, AlertCircle, Table2, FileText, Check, MessageSquare } from 'lucide-react'
 import LoyaltyPointsDisplay from '@/components/pos/LoyaltyPointsDisplay'
 import { notify } from '../ui/NotificationSystem'
 
@@ -25,10 +25,13 @@ export default function CartSidebar({
   onToggleTheme,
   selectedTable,
   onChangeTable,
-  onInstructionsChange
+  onInstructionsChange,
+  onUpdateItemInstruction
 }) {
   const [showInstructionPanel, setShowInstructionPanel] = useState(false)
   const [draftInstruction, setDraftInstruction] = useState('')
+  const [expandedItemId, setExpandedItemId] = useState(null)
+  const [draftItemInstructions, setDraftItemInstructions] = useState({})
   const getOrderTypeTitle = () => {
     switch(orderType) {
       case 'walkin': return 'POS Walk-in'
@@ -314,12 +317,31 @@ export default function CartSidebar({
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={() => onRemoveItem(item.id)}
-                      className={`p-0.5 text-red-400 hover:text-red-600 hover:${isDark ? 'bg-red-900/20' : 'bg-red-50'} rounded transition-all opacity-0 group-hover:opacity-100`}
-                    >
-                      <Trash2 className="w-2.5 h-2.5" />
-                    </button>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        onClick={() => {
+                          const opening = expandedItemId !== item.id
+                          setExpandedItemId(opening ? item.id : null)
+                          if (opening) {
+                            setDraftItemInstructions(prev => ({ ...prev, [item.id]: item.itemInstructions || '' }))
+                          }
+                        }}
+                        className={`p-0.5 rounded transition-all ${
+                          item.itemInstructions
+                            ? isDark ? 'text-amber-400' : 'text-amber-500'
+                            : isDark ? 'text-gray-400 hover:text-amber-400' : 'text-gray-400 hover:text-amber-500'
+                        }`}
+                        title="Item instructions"
+                      >
+                        <MessageSquare className="w-2.5 h-2.5" />
+                      </button>
+                      <button
+                        onClick={() => onRemoveItem(item.id)}
+                        className={`p-0.5 text-red-400 hover:text-red-600 rounded transition-all`}
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between">
@@ -354,6 +376,53 @@ export default function CartSidebar({
                       </div>
                     </div>
                   </div>
+
+                  {/* Inline item instruction panel */}
+                  <AnimatePresence>
+                    {expandedItemId === item.id && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="mt-1.5 pt-1.5 border-t border-dashed border-amber-400/40 space-y-1.5">
+                          <textarea
+                            autoFocus
+                            rows={2}
+                            value={draftItemInstructions[item.id] ?? item.itemInstructions ?? ''}
+                            onChange={e => setDraftItemInstructions(prev => ({ ...prev, [item.id]: e.target.value }))}
+                            placeholder="Note for this item..."
+                            className={`w-full px-2 py-1 text-[11px] rounded border resize-none focus:outline-none focus:ring-1 focus:ring-amber-400 ${
+                              isDark
+                                ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-500'
+                                : 'bg-amber-50 border-amber-200 text-gray-800 placeholder-gray-400'
+                            }`}
+                          />
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => setExpandedItemId(null)}
+                              className={`flex-1 py-1 text-[11px] font-medium rounded transition-colors ${
+                                isDark ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                              }`}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => {
+                                onUpdateItemInstruction?.(item.id, draftItemInstructions[item.id] ?? '')
+                                setExpandedItemId(null)
+                              }}
+                              className="flex-[2] py-1 text-[11px] font-bold rounded bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               ))}
             </AnimatePresence>

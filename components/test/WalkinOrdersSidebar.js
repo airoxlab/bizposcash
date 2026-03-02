@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Coffee, RefreshCw, ArrowLeft, Table2, ClipboardList, X, Truck, AlertCircle, User } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -23,6 +23,20 @@ export default function WalkinOrdersSidebar({
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const listRef = useRef(null)
+
+  // Fast scroll — multiply wheel delta so the list scrolls further per notch
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      if (e.deltaY === 0) return
+      e.preventDefault()
+      el.scrollTop += e.deltaY * 2.5
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   useEffect(() => {
     fetchPendingOrders()
@@ -426,7 +440,7 @@ export default function WalkinOrdersSidebar({
       </div>
 
       {/* Orders List */}
-      <div className="flex-1 overflow-y-scroll p-3" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      <div ref={listRef} className="flex-1 overflow-y-scroll p-3" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
         <style jsx>{`
           div::-webkit-scrollbar {
             display: none;

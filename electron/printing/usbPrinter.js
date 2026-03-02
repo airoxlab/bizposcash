@@ -546,6 +546,9 @@ async function generateKitchenTokenESCPOS(orderData, userProfile) {
             commands.push(leftText(productLine));
           }
         }
+        if (item.instructions) {
+          commands.push(leftText(`  * ${item.instructions}`));
+        }
       } else {
         let itemName = item.name;
         if (item.size) itemName = `${item.name} (${item.size})`;
@@ -562,6 +565,9 @@ async function generateKitchenTokenESCPOS(orderData, userProfile) {
           commands.push(leftRight(`- ${itemName}`, item.quantity.toString()));
         } else {
           commands.push(leftRight(itemName, item.quantity.toString()));
+        }
+        if (item.instructions) {
+          commands.push(leftText(`  * ${item.instructions}`));
         }
       }
     }
