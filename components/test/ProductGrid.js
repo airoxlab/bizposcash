@@ -13,7 +13,8 @@ const ProductGrid = forwardRef(({
   classes,
   isDark,
   networkStatus,
-  selectedCategoryId = null
+  selectedCategoryId = null,
+  headerCenter = null
 }, ref) => {
   const productRefs = useRef({})
   const dealRef = useRef(null)
@@ -149,6 +150,11 @@ const ProductGrid = forwardRef(({
               )}
             </p>
           </div>
+          {headerCenter && (
+            <div className="flex-1 flex justify-center px-4">
+              {headerCenter}
+            </div>
+          )}
           <div className="text-right">
             <div className={`text-xs ${classes.textSecondary}`}>
               {new Date().toLocaleDateString()}

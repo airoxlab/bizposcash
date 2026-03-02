@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { User, ShoppingCart, Plus, Minus, Trash2, WifiOff, Edit3, Gift, X, Sun, Moon, Wifi, AlertCircle, Table2, FileText, Check, MessageSquare } from 'lucide-react'
+import { User, ShoppingCart, Plus, Minus, Trash2, WifiOff, Gift, X, Sun, Moon, Wifi, Table2, FileText, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react'
 import LoyaltyPointsDisplay from '@/components/pos/LoyaltyPointsDisplay'
 import { notify } from '../ui/NotificationSystem'
+import InlineCustomerPanel from '../pos/InlineCustomerPanel'
 
 export default function CartSidebar({
   cart = [],
@@ -26,11 +27,21 @@ export default function CartSidebar({
   selectedTable,
   onChangeTable,
   onInstructionsChange,
-  onUpdateItemInstruction
+  onUpdateItemInstruction,
+  inlineCustomer = false,
+  onCustomerChange,
+  orderData = {},
+  onOrderDataChange
 }) {
   const [showInstructionPanel, setShowInstructionPanel] = useState(false)
   const [draftInstruction, setDraftInstruction] = useState('')
   const [expandedItemId, setExpandedItemId] = useState(null)
+  const [custMode, setCustMode] = useState('idle') // 'idle' | 'searching' | 'expanded'
+
+  // Reset customer panel when customer is cleared externally
+  useEffect(() => {
+    if (!customer) setCustMode('idle')
+  }, [customer])
   const [draftItemInstructions, setDraftItemInstructions] = useState({})
   const getOrderTypeTitle = () => {
     switch(orderType) {
@@ -164,11 +175,11 @@ export default function CartSidebar({
         )}
       </div>
 
-      {/* Action Row - Table / Customer / Instruction */}
+      {/* Action Row - always two compact buttons side-by-side */}
       <div className={`p-2 ${classes.border} border-b ${isDark ? 'bg-gray-900/50' : 'bg-gray-50'}`}>
         <div className="flex items-center gap-1.5">
 
-          {/* Table Button - only when table is selected */}
+          {/* Table Button */}
           {selectedTable && (
             <motion.button
               whileHover={{ scale: 1.02 }}
@@ -183,8 +194,51 @@ export default function CartSidebar({
             </motion.button>
           )}
 
-          {/* Customer Button */}
-          {customer ? (
+          {/* ── INLINE CUSTOMER TRIGGER (new-order page) ── */}
+          {inlineCustomer && (
+            customer ? (
+              /* Customer selected: name button + clear */
+              <div className="flex flex-1 items-center gap-1 min-w-0">
+                <button
+                  onClick={() => { setShowInstructionPanel(false); setCustMode(m => m === 'expanded' ? 'idle' : 'expanded') }}
+                  className={`flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                    custMode === 'expanded'
+                      ? isDark ? 'bg-green-800/40 border-green-500 text-green-200' : 'bg-green-100 border-green-500 text-green-800'
+                      : isDark ? 'bg-green-900/30 border-green-700 text-green-300' : 'bg-green-50 border-green-300 text-green-700'
+                  }`}
+                >
+                  <User className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate flex-1 text-left">{customer.full_name?.trim() || customer.phone}</span>
+                  {custMode === 'expanded'
+                    ? <ChevronUp className="w-3 h-3 flex-shrink-0" />
+                    : <ChevronDown className="w-3 h-3 flex-shrink-0" />
+                  }
+                </button>
+                <button
+                  onClick={() => { onCustomerChange?.(null); setCustMode('idle'); setShowInstructionPanel(false) }}
+                  className={`flex-shrink-0 p-1.5 rounded-lg border transition-all ${isDark ? 'bg-gray-700 border-gray-600 text-gray-400 hover:text-red-400 hover:border-red-500' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300'}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              /* No customer: Add Customer dashed button */
+              <button
+                onClick={() => { setShowInstructionPanel(false); setCustMode(m => m === 'searching' ? 'idle' : 'searching') }}
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                  custMode === 'searching'
+                    ? isDark ? 'border-purple-500 text-purple-400 bg-gray-800/60' : 'border-purple-400 text-purple-600 bg-purple-50'
+                    : isDark ? 'border-gray-600 border-dashed text-gray-400 hover:border-purple-500 hover:text-purple-400' : 'border-gray-300 border-dashed text-gray-500 hover:border-purple-400 hover:text-purple-600'
+                }`}
+              >
+                <User className="w-3 h-3" />
+                <span>{custMode === 'searching' ? 'Cancel' : 'Add Customer'}</span>
+              </button>
+            )
+          )}
+
+          {/* ── MODAL CUSTOMER BUTTON (other pages) ── */}
+          {!inlineCustomer && (customer ? (
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -208,13 +262,22 @@ export default function CartSidebar({
               <User className="w-3 h-3" />
               <span>Customer</span>
             </motion.button>
-          )}
+          ))}
 
           {/* Instruction Button */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => { setDraftInstruction(orderInstructions); setShowInstructionPanel(true) }}
+            onClick={() => {
+              // always close customer panel when interacting with note
+              setCustMode('idle')
+              if (!showInstructionPanel) {
+                setDraftInstruction(orderInstructions)
+                setShowInstructionPanel(true)
+              } else {
+                setShowInstructionPanel(false)
+              }
+            }}
             className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
               orderInstructions
                 ? isDark ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-amber-50 border-amber-400 text-amber-700'
@@ -222,9 +285,57 @@ export default function CartSidebar({
             }`}
           >
             <FileText className="w-3 h-3" />
-            <span>Instruction</span>
+            <span>{orderInstructions ? 'Note ✓' : 'Note'}</span>
           </motion.button>
         </div>
+
+        {/* ── FULL-WIDTH CONTENT BELOW (search / customer fields / instruction) ── */}
+
+        {/* Inline Customer Panel content — full width, controlled from action row */}
+        {inlineCustomer && (custMode === 'searching' || custMode === 'expanded') && (
+          <InlineCustomerPanel
+            contentOnly={true}
+            mode={custMode}
+            onModeChange={setCustMode}
+            orderType={orderType}
+            customer={customer}
+            orderData={orderData}
+            onCustomerChange={(c) => { onCustomerChange?.(c) }}
+            onOrderDataChange={onOrderDataChange}
+            classes={classes}
+            isDark={isDark}
+          />
+        )}
+
+        {/* Inline Instruction Textarea */}
+        {showInstructionPanel && (
+          <div className="mt-1.5 space-y-1">
+            <textarea
+              autoFocus
+              rows={2}
+              value={draftInstruction}
+              onChange={e => setDraftInstruction(e.target.value)}
+              placeholder="Special requests or notes for this order..."
+              className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none resize-none ${
+                isDark
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-500 focus:border-amber-500'
+                  : 'bg-white border-gray-300 text-gray-800 placeholder-gray-400 focus:border-amber-400'
+              }`}
+            />
+            <div className="flex gap-1">
+              <button
+                onClick={() => setShowInstructionPanel(false)}
+                className={`flex-1 py-1 text-xs rounded border transition-colors ${
+                  isDark ? 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-100'
+                }`}
+              >Cancel</button>
+              <button
+                onClick={() => { onInstructionsChange?.(draftInstruction); setShowInstructionPanel(false) }}
+                className="flex-[2] py-1 text-xs font-bold rounded bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+              >Save</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Loyalty Points Display - Below Customer Section */}
@@ -466,91 +577,6 @@ export default function CartSidebar({
         </div>
       )}
 
-      {/* Instruction Full-Screen Popup */}
-      {showInstructionPanel && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setShowInstructionPanel(false)}
-          />
-
-          {/* Panel */}
-          <div className={`relative w-full max-w-md h-full ${isDark ? 'bg-gray-900' : 'bg-white'} shadow-2xl flex flex-col`}>
-            {/* Header */}
-            <div className={`${getHeaderGradient()} p-5`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
-                    <FileText className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-white">Order Instruction</h2>
-                    <p className="text-white/90 text-xs">Optional note for this order</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowInstructionPanel(false)}
-                  className="w-9 h-9 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-colors"
-                >
-                  <X className="w-5 h-5 text-white" />
-                </button>
-              </div>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-5">
-              <label className={`block text-sm font-semibold mb-2 flex items-center ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>
-                <FileText className={`w-4 h-4 mr-2 ${orderType === 'takeaway' ? 'text-orange-500' : orderType === 'delivery' ? 'text-blue-500' : 'text-purple-500'}`} />
-                Instructions
-                <span className={`ml-2 text-xs font-normal ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>(Optional)</span>
-              </label>
-              <textarea
-                autoFocus
-                value={draftInstruction}
-                onChange={(e) => setDraftInstruction(e.target.value)}
-                rows={5}
-                className={`w-full px-4 py-3 rounded-lg border-2 resize-none transition-all focus:outline-none focus:ring-2 ${
-                  isDark
-                    ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500 focus:border-amber-500 focus:ring-amber-500/20'
-                    : 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-amber-500 focus:ring-amber-500/20'
-                }`}
-                placeholder="Any special requests or notes for this order..."
-              />
-            </div>
-
-            {/* Footer */}
-            <div className={`border-t p-4 ${isDark ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
-              <div className="flex space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowInstructionPanel(false)}
-                  className={`flex-1 px-5 py-3 font-semibold rounded-lg transition-all ${
-                    isDark
-                      ? 'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-center">
-                    <X className="w-4 h-4 mr-2" />
-                    Cancel
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { onInstructionsChange?.(draftInstruction); setShowInstructionPanel(false) }}
-                  className={`flex-[2] px-5 py-3 ${getHeaderGradient()} text-white font-bold rounded-lg transition-all shadow-lg opacity-100 hover:opacity-90`}
-                >
-                  <div className="flex items-center justify-center">
-                    <Check className="w-4 h-4 mr-2" />
-                    Save
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

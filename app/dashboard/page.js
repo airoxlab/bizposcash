@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Users,
   ShoppingBag,
+  ShoppingCart,
   Truck,
   Receipt,
   FileText,
@@ -32,9 +33,12 @@ import {
   Trash2,
   CloudUpload,
   Wallet,
-  DollarSign
+  DollarSign,
+  Clock,
+  ArrowRight
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '../../lib/supabase'
 import { cacheManager } from '../../lib/cacheManager'
 import { themeManager } from '../../lib/themeManager'
 import { authManager } from '../../lib/authManager'
@@ -55,7 +59,12 @@ export default function Dashboard() {
     networkStatus: { isOnline: true, unsyncedOrders: 0, lastSync: null, isSyncing: false }
   })
   const [theme, setTheme] = useState('light')
+  const [layoutTheme, setLayoutTheme] = useState(() =>
+    typeof window !== 'undefined' ? (localStorage.getItem('pos_layout_theme') || 'classic') : 'classic'
+  )
   const [pendingWebOrders, setPendingWebOrders] = useState(0)
+  const [activeOrders, setActiveOrders] = useState([])
+  const [ordersLoading, setOrdersLoading] = useState(true)
   const router = useRouter()
   const permissions = usePermissions()
 
@@ -151,9 +160,14 @@ export default function Dashboard() {
     // Start background sync
     cacheManager.startBackgroundSync()
 
+    // Fetch active orders and poll every 30s
+    fetchActiveOrders()
+    const ordersRefreshTimer = setInterval(fetchActiveOrders, 30000)
+
     return () => {
       clearInterval(timer)
       clearInterval(countRefreshTimer)
+      clearInterval(ordersRefreshTimer)
       webOrderNotificationManager.stopListening()
       // Don't stop networkPrintListener here - it should persist across pages
       // It will be stopped on logout (authManager) or when "I am Server" is toggled OFF (printer page)
@@ -224,6 +238,38 @@ export default function Dashboard() {
   const handleLogout = async () => {
     await authManager.logout()
     router.push('/')
+  }
+
+  const fetchActiveOrders = async () => {
+    try {
+      const userData = authManager.getCurrentUser()
+      if (!userData?.id) return
+      const today = new Date().toISOString().split('T')[0]
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, order_number, order_type, order_status, payment_status, total_amount, created_at, customers(full_name)')
+        .eq('user_id', userData.id)
+        .or('order_source.eq.POS,is_approved.eq.true')
+        .gte('order_date', today)
+        .lte('order_date', today)
+        .neq('payment_status', 'Paid')
+        .order('created_at', { ascending: false })
+        .limit(8)
+      if (!error && data) setActiveOrders(data)
+    } catch (e) {
+      // silently ignore
+    } finally {
+      setOrdersLoading(false)
+    }
+  }
+
+  const getTimeElapsed = (createdAt) => {
+    const diffMs = new Date() - new Date(createdAt)
+    const diffMins = Math.floor(diffMs / 60000)
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    const h = Math.floor(diffMins / 60)
+    return `${h}h ${diffMins % 60}m`
   }
 
   const formatTime = (date) => {
@@ -646,46 +692,203 @@ export default function Dashboard() {
           transition={{ delay: 0.2 }}
           className="mb-12"
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {orderTypeCards.map((card, index) => {
-              const hasPermission = hasCardPermission(card.permissionKey)
-              return (
+          {layoutTheme === 'modern' ? (
+            /* Modern layout: New Order card + Active Orders feed */
+            <div className="flex gap-6 items-stretch">
+              {/* New Order Card */}
               <motion.div
-                key={card.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 + index * 0.1 }}
-                whileHover={hasPermission ? { y: -10, scale: 1.02 } : {}}
-                whileTap={hasPermission ? { scale: 0.98 } : {}}
-                onClick={() => handleNavigation(card.route, card.permissionKey)}
-                className={`${hasPermission ? 'cursor-pointer' : 'cursor-not-allowed'} group relative`}
+                transition={{ delay: 0.3 }}
+                whileHover={{ y: -10, scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => router.push('/new-order')}
+                className="cursor-pointer group relative w-full max-w-sm flex-shrink-0"
               >
-                <div className={`relative overflow-hidden rounded-3xl shadow-xl ${hasPermission ? 'hover:shadow-2xl' : 'opacity-60'} transition-all duration-300`}>
-                  <div className={`absolute inset-0 bg-gradient-to-br ${card.gradient} ${!hasPermission ? 'opacity-50' : 'opacity-90'}`}></div>
-                  {!hasPermission && (
-                    <div className="absolute top-3 right-3 z-20">
-                      <div className="bg-red-500/90 backdrop-blur-sm text-white text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg">
-                        <Shield className="w-3.5 h-3.5" />
-                        LOCKED
-                      </div>
-                    </div>
-                  )}
-                  <div className="relative p-8 text-center text-white">
+                <div className="relative overflow-hidden rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 h-full">
+                  <div className="absolute inset-0 bg-gradient-to-br from-purple-500 to-indigo-600 opacity-90"></div>
+                  <div className="relative p-10 text-center text-white h-full flex flex-col items-center justify-center">
                     <motion.div
                       whileHover={{ rotate: 360, scale: 1.1 }}
                       transition={{ duration: 0.5 }}
-                      className="w-20 h-20 mx-auto mb-6 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm"
+                      className="w-24 h-24 mx-auto mb-6 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm"
                     >
-                      <card.icon className="w-10 h-10" />
+                      <ShoppingCart className="w-12 h-12" />
                     </motion.div>
-                    <h3 className="text-2xl font-bold mb-3">{card.title}</h3>
-                    <p className="text-white/80 font-medium">{card.description}</p>
+                    <h3 className="text-3xl font-bold mb-3">New Order</h3>
+                    <p className="text-white/80 font-medium">Start a new walk-in, takeaway or delivery order</p>
                   </div>
                   <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 </div>
               </motion.div>
-            )})}
-          </div>
+
+              {/* Active Orders Feed */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="flex-1 min-w-0"
+              >
+                <div className={`rounded-3xl shadow-xl border overflow-hidden flex flex-col ${isDark ? 'bg-gray-800/80 border-gray-700/60' : 'bg-white/80 border-white/60'} backdrop-blur-md`}>
+                  {/* Header */}
+                  <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-gray-700/60' : 'border-gray-200/60'}`}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse block" />
+                      <span className={`font-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>Active Orders</span>
+                      {activeOrders.length > 0 && (
+                        <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                          {activeOrders.length}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={fetchActiveOrders}
+                      className={`p-1.5 rounded-lg transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-400 hover:text-white' : 'hover:bg-gray-100 text-gray-500 hover:text-gray-800'}`}
+                      title="Refresh"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Orders list */}
+                  <div className="overflow-y-auto" style={{ scrollbarWidth: 'none', maxHeight: '180px' }}>
+                    {ordersLoading ? (
+                      <div className="p-4 space-y-3">
+                        {[...Array(4)].map((_, i) => (
+                          <div key={i} className={`h-14 rounded-xl animate-pulse ${isDark ? 'bg-gray-700/60' : 'bg-gray-100'}`} />
+                        ))}
+                      </div>
+                    ) : activeOrders.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full py-10 px-6 text-center">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-3 ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                          <CheckCircle className={`w-7 h-7 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
+                        </div>
+                        <p className={`font-semibold text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>All caught up!</p>
+                        <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>No pending orders right now</p>
+                      </div>
+                    ) : (
+                      <div className="p-3 space-y-2">
+                        {activeOrders.map((order) => {
+                          const typeColor = order.order_type === 'walkin'
+                            ? 'bg-emerald-500'
+                            : order.order_type === 'takeaway'
+                            ? 'bg-blue-500'
+                            : 'bg-orange-500'
+                          const borderColor = order.order_type === 'walkin'
+                            ? 'border-l-emerald-500'
+                            : order.order_type === 'takeaway'
+                            ? 'border-l-blue-500'
+                            : 'border-l-orange-500'
+                          const typeLabel = order.order_type === 'walkin'
+                            ? 'Walk-in'
+                            : order.order_type === 'takeaway'
+                            ? 'Takeaway'
+                            : 'Delivery'
+                          const TypeIcon = order.order_type === 'walkin'
+                            ? Users
+                            : order.order_type === 'takeaway'
+                            ? ShoppingBag
+                            : Truck
+                          const customerName = order.customers?.full_name
+
+                          return (
+                            <motion.div
+                              key={order.id}
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              className={`flex items-center gap-3 p-3 rounded-xl border-l-4 ${isDark ? 'bg-gray-700/50 hover:bg-gray-700' : 'bg-gray-50 hover:bg-gray-100'} transition-colors cursor-pointer ${borderColor}`}
+                              onClick={() => router.push('/orders')}
+                            >
+                              {/* Type icon */}
+                              <div className={`w-8 h-8 rounded-lg ${typeColor} flex items-center justify-center flex-shrink-0`}>
+                                <TypeIcon className="w-4 h-4 text-white" />
+                              </div>
+                              {/* Info */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                    #{order.order_number}
+                                  </span>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${isDark ? 'bg-gray-600 text-gray-300' : 'bg-gray-200 text-gray-600'}`}>
+                                    {typeLabel}
+                                  </span>
+                                </div>
+                                <div className={`text-xs mt-0.5 truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                  {customerName || 'Walk-in customer'} &nbsp;·&nbsp;
+                                  <Clock className="w-3 h-3 inline -mt-0.5" /> {getTimeElapsed(order.created_at)}
+                                </div>
+                              </div>
+                              {/* Amount */}
+                              <div className="text-right flex-shrink-0">
+                                <div className={`font-bold text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                  Rs {parseFloat(order.total_amount || 0).toFixed(0)}
+                                </div>
+                                <div className={`text-xs ${order.order_status === 'pending' ? 'text-yellow-500' : order.order_status === 'preparing' ? 'text-orange-500' : 'text-green-500'}`}>
+                                  {order.order_status || 'pending'}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className={`px-5 py-3 border-t ${isDark ? 'border-gray-700/60' : 'border-gray-200/60'}`}>
+                    <button
+                      onClick={() => router.push('/orders')}
+                      className={`flex items-center gap-1.5 text-sm font-semibold transition-colors ${isDark ? 'text-purple-400 hover:text-purple-300' : 'text-purple-600 hover:text-purple-800'}`}
+                    >
+                      View all orders <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          ) : (
+            /* Classic layout: three individual cards */
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {orderTypeCards.map((card, index) => {
+                const hasPermission = hasCardPermission(card.permissionKey)
+                return (
+                <motion.div
+                  key={card.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 + index * 0.1 }}
+                  whileHover={hasPermission ? { y: -10, scale: 1.02 } : {}}
+                  whileTap={hasPermission ? { scale: 0.98 } : {}}
+                  onClick={() => handleNavigation(card.route, card.permissionKey)}
+                  className={`${hasPermission ? 'cursor-pointer' : 'cursor-not-allowed'} group relative`}
+                >
+                  <div className={`relative overflow-hidden rounded-3xl shadow-xl ${hasPermission ? 'hover:shadow-2xl' : 'opacity-60'} transition-all duration-300`}>
+                    <div className={`absolute inset-0 bg-gradient-to-br ${card.gradient} ${!hasPermission ? 'opacity-50' : 'opacity-90'}`}></div>
+                    {!hasPermission && (
+                      <div className="absolute top-3 right-3 z-20">
+                        <div className="bg-red-500/90 backdrop-blur-sm text-white text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg">
+                          <Shield className="w-3.5 h-3.5" />
+                          LOCKED
+                        </div>
+                      </div>
+                    )}
+                    <div className="relative p-8 text-center text-white">
+                      <motion.div
+                        whileHover={{ rotate: 360, scale: 1.1 }}
+                        transition={{ duration: 0.5 }}
+                        className="w-20 h-20 mx-auto mb-6 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm"
+                      >
+                        <card.icon className="w-10 h-10" />
+                      </motion.div>
+                      <h3 className="text-2xl font-bold mb-3">{card.title}</h3>
+                      <p className="text-white/80 font-medium">{card.description}</p>
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                  </div>
+                </motion.div>
+              )})}
+            </div>
+          )}
         </motion.div>
 
         {/* Bottom Menu */}
@@ -693,6 +896,7 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
+          className={layoutTheme === 'modern' ? 'mt-8' : ''}
         >
           <h3 className={`text-2xl font-bold ${themeClasses.textPrimary} mb-6 text-center`}>
             Quick Actions

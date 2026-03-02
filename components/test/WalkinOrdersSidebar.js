@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Coffee, RefreshCw, ArrowLeft, Table2, ClipboardList, X, Truck, AlertCircle, User } from 'lucide-react'
+import { Coffee, RefreshCw, ArrowLeft, Table2, ClipboardList, X, Truck, AlertCircle, User, ShoppingBag } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { authManager } from '../../lib/authManager'
 import { cacheManager } from '../../lib/cacheManager'
@@ -18,12 +18,26 @@ export default function WalkinOrdersSidebar({
   selectedTable,
   onBackClick,
   orderType = 'walkin', // 'walkin' or 'takeaway'
-  refreshTrigger = 0 // Increment to trigger a refresh
+  refreshTrigger = 0, // Increment to trigger a refresh
+  showTypeTabs = false // When true, shows Walk-in/Takeaway/Delivery tab switcher
 }) {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const listRef = useRef(null)
+  const [activeTypeTab, setActiveTypeTab] = useState(orderType)
+  const effectiveOrderType = showTypeTabs ? activeTypeTab : orderType
+
+  // Keep sidebar tab in sync when parent switches order type
+  useEffect(() => {
+    if (showTypeTabs) setActiveTypeTab(orderType)
+  }, [orderType])
+
+  const TYPE_TABS = [
+    { id: 'walkin', label: 'Walk-in', icon: User, gradient: 'from-purple-500 to-indigo-600' },
+    { id: 'takeaway', label: 'Take Away', icon: ShoppingBag, gradient: 'from-orange-500 to-amber-500' },
+    { id: 'delivery', label: 'Delivery', icon: Truck, gradient: 'from-emerald-500 to-teal-600' },
+  ]
 
   // Fast scroll — multiply wheel delta so the list scrolls further per notch
   useEffect(() => {
@@ -45,7 +59,7 @@ export default function WalkinOrdersSidebar({
     const handleOrdersUpdated = (event) => {
       console.log('📡 [WalkinOrdersSidebar] Orders updated event received:', event.detail)
       // Only refresh if the order type matches
-      if (event.detail?.orderType === orderType) {
+      if (event.detail?.orderType === effectiveOrderType) {
         console.log('🔄 [WalkinOrdersSidebar] Auto-refreshing orders due to cache update')
         fetchPendingOrders()
       }
@@ -56,7 +70,7 @@ export default function WalkinOrdersSidebar({
     return () => {
       window.removeEventListener('ordersUpdated', handleOrdersUpdated)
     }
-  }, [orderType])
+  }, [effectiveOrderType])
 
   // Refresh orders when refreshTrigger changes
   useEffect(() => {
@@ -122,7 +136,7 @@ export default function WalkinOrdersSidebar({
             )
           `)
           .eq('user_id', user.id)
-          .eq('order_type', orderType)
+          .eq('order_type', effectiveOrderType)
           .in('order_status', ['Pending', 'Preparing', 'Ready', 'Dispatched'])
           .order('created_at', { ascending: false })
 
@@ -185,7 +199,7 @@ export default function WalkinOrdersSidebar({
         // 3. Add/update with freshly fetched orders
         const offlineOrders = existingCachedOrders.filter(o => !o._isSynced)
         const otherTypeOrders = existingCachedOrders.filter(o =>
-          o._isSynced && o.order_type !== orderType
+          o._isSynced && o.order_type !== effectiveOrderType
         )
 
         const updatedCache = [
@@ -218,13 +232,13 @@ export default function WalkinOrdersSidebar({
         console.log(`💳 [WalkinOrdersSidebar] Cache has ${cacheManager.cache.paymentTransactions.size} orders with payment transactions`)
 
         const filteredOrders = cachedOrders.filter(order =>
-          order.order_type === orderType &&
+          order.order_type === effectiveOrderType &&
           ['Pending', 'Preparing', 'Ready', 'Dispatched'].includes(order.order_status)
         )
-        console.log(`✅ [WalkinOrdersSidebar] Filtered to ${filteredOrders.length} ${orderType} pending orders`)
+        console.log(`✅ [WalkinOrdersSidebar] Filtered to ${filteredOrders.length} ${effectiveOrderType} pending orders`)
 
         // Get table info from cache for walkin orders
-        if (orderType === 'walkin') {
+        if (effectiveOrderType === 'walkin') {
           const tables = cacheManager.getAllTables()
           filteredOrders.forEach(order => {
             if (order.table_id) {
@@ -241,7 +255,7 @@ export default function WalkinOrdersSidebar({
         }
 
         // Get delivery boy info from cache for delivery orders
-        if (orderType === 'delivery') {
+        if (effectiveOrderType === 'delivery') {
           const deliveryBoys = cacheManager.getAllDeliveryBoys()
           filteredOrders.forEach(order => {
             if (order.delivery_boy_id) {
@@ -279,7 +293,7 @@ export default function WalkinOrdersSidebar({
       // Fallback to cached orders on error
       const cachedOrders = cacheManager.getAllOrders()
       const filteredOrders = cachedOrders.filter(order =>
-        order.order_type === orderType &&
+        order.order_type === effectiveOrderType &&
         ['Pending', 'Preparing', 'Ready'].includes(order.order_status)
       )
 
@@ -387,7 +401,7 @@ export default function WalkinOrdersSidebar({
             </motion.button>
 
             {/* Table Selection Icon - Only for walkin */}
-            {orderType === 'walkin' && onTableClick && (
+            {effectiveOrderType === 'walkin' && onTableClick && (
               <motion.button
                 whileHover={{ scale: 1.08 }}
                 whileTap={{ scale: 0.95 }}
@@ -408,6 +422,30 @@ export default function WalkinOrdersSidebar({
           </div>
         </div>
       </div>
+
+      {/* Type Tab Bar — shown only in new-order page */}
+      {showTypeTabs && (
+        <div className={`px-3 pt-3 pb-2 ${classes.border} border-b`}>
+          <div className="flex gap-1.5">
+            {TYPE_TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTypeTab(tab.id)}
+                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
+                  activeTypeTab === tab.id
+                    ? `bg-gradient-to-r ${tab.gradient} text-white shadow-sm scale-105`
+                    : isDark
+                      ? 'bg-gray-700 text-gray-400 hover:bg-gray-600 border border-gray-600'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200 border border-gray-200'
+                }`}
+              >
+                <tab.icon className="w-3 h-3" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Orders Section Header */}
       <div className="p-3 pb-0">
@@ -509,7 +547,7 @@ export default function WalkinOrdersSidebar({
                         {formatOrderDisplay(order)}
                       </div>
                       <div className={`text-xs ${classes.textSecondary}`}>
-                        {orderType === 'walkin' ? 'Walkin' : orderType === 'takeaway' ? 'Takeaway' : 'Delivery'}
+                        {effectiveOrderType === 'walkin' ? 'Walkin' : effectiveOrderType === 'takeaway' ? 'Takeaway' : 'Delivery'}
                       </div>
                     </div>
                   </div>
@@ -533,7 +571,7 @@ export default function WalkinOrdersSidebar({
                 </div>
 
                 {/* Show table info for walkin orders */}
-                {orderType === 'walkin' && order.tables && (
+                {effectiveOrderType === 'walkin' && order.tables && (
                   <div className={`flex items-center gap-1 mt-1.5 pt-1.5 border-t ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
                     <Table2 className={`w-3 h-3 ${isDark ? 'text-purple-400' : 'text-purple-600'}`} />
                     <span className={`text-xs ${isDark ? 'text-purple-400' : 'text-purple-600'} font-medium`}>
@@ -543,7 +581,7 @@ export default function WalkinOrdersSidebar({
                 )}
 
                 {/* Show rider info for delivery orders */}
-                {orderType === 'delivery' && (
+                {effectiveOrderType === 'delivery' && (
                   <div className={`flex items-center gap-1 mt-1.5 pt-1.5 border-t ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
                     {order.delivery_boys ? (
                       <>
