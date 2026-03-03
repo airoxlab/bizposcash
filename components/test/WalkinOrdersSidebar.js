@@ -34,10 +34,6 @@ export default function WalkinOrdersSidebar({
   const [activeTypeTab, setActiveTypeTab] = useState(orderType)
   const effectiveOrderType = showTypeTabs ? activeTypeTab : orderType
 
-  // Keep sidebar tab in sync when parent switches order type
-  useEffect(() => {
-    if (showTypeTabs) setActiveTypeTab(orderType)
-  }, [orderType])
 
   const TYPE_TABS = [
     { id: 'walkin', label: 'Walk-in', icon: User, gradient: 'from-purple-500 to-indigo-600' },
@@ -75,6 +71,13 @@ export default function WalkinOrdersSidebar({
       window.removeEventListener('ordersUpdated', handleOrdersUpdated)
     }
   }, [effectiveOrderType])
+
+  // On classic pages (showTypeTabs=false), auto-fetch orders on mount like before
+  useEffect(() => {
+    if (!showTypeTabs) {
+      fetchPendingOrders()
+    }
+  }, [])
 
   // Refresh orders when refreshTrigger changes
   useEffect(() => {
@@ -370,7 +373,7 @@ export default function WalkinOrdersSidebar({
   }
 
   return (
-    <div className={`w-64 ${classes.card} ${classes.shadow} shadow-xl ${classes.border} border-r flex flex-col`}>
+    <div className={`w-64 h-full ${classes.card} ${classes.shadow} shadow-xl ${classes.border} border-r flex flex-col`}>
       {/* Header - Same as CategorySidebar */}
       <div className={`p-4 ${classes.border} border-b ${classes.card}`}>
         <motion.button
@@ -393,15 +396,33 @@ export default function WalkinOrdersSidebar({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Orders Icon - Active state */}
+            {/* Orders Icon - toggles orders panel on new-order page */}
             <motion.button
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.95 }}
-              onClick={onClose}
-              className={`p-2.5 rounded-lg transition-all relative ${isDark ? 'bg-blue-600/30 border border-blue-500' : 'bg-blue-100 border border-blue-400'}`}
+              onClick={() => {
+                if (showTypeTabs) {
+                  const next = !showOrders
+                  setShowOrders(next)
+                  if (next) { setLoading(true); fetchPendingOrders() }
+                } else {
+                  onClose()
+                }
+              }}
+              className={`p-2.5 rounded-lg transition-all relative ${
+                showTypeTabs
+                  ? showOrders
+                    ? (isDark ? 'bg-blue-600/30 border border-blue-500' : 'bg-blue-100 border border-blue-400')
+                    : (isDark ? 'bg-gray-700 border border-gray-600 hover:bg-gray-600' : 'bg-gray-100 border border-gray-200 hover:bg-gray-200')
+                  : (isDark ? 'bg-blue-600/30 border border-blue-500' : 'bg-blue-100 border border-blue-400')
+              }`}
               title="View pending orders"
             >
-              <ClipboardList className={`w-5 h-5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
+              <ClipboardList className={`w-5 h-5 ${
+                showOrders || !showTypeTabs
+                  ? (isDark ? 'text-blue-400' : 'text-blue-600')
+                  : (isDark ? 'text-gray-400' : 'text-gray-500')
+              }`} />
             </motion.button>
 
             {/* Table Selection Icon - Only for walkin */}
@@ -427,39 +448,40 @@ export default function WalkinOrdersSidebar({
         </div>
       </div>
 
-      {/* Type Tab Bar — shown only in new-order page */}
-      {showTypeTabs && (
-        <div className={`px-3 pt-3 pb-2 ${classes.border} border-b`}>
-          <div className="flex gap-1.5">
-            {TYPE_TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  const switching = activeTypeTab !== tab.id
-                  setActiveTypeTab(tab.id)
-                  setShowOrders(true)
-                  if (switching || !showOrders) {
-                    setLoading(true)
-                    fetchPendingOrders()
-                  }
-                }}
-                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
-                  activeTypeTab === tab.id && showOrders
-                    ? `bg-gradient-to-r ${tab.gradient} text-white shadow-sm scale-105`
-                    : isDark
-                      ? 'bg-gray-700 text-gray-400 hover:bg-gray-600 border border-gray-600'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200 border border-gray-200'
-                }`}
-              >
-                <tab.icon className="w-3 h-3" />
-                {tab.label}
-              </button>
-            ))}
+      {/* Type Tab Bar — only visible when orders panel is open */}
+      {showTypeTabs && showOrders && (
+        <div className={`px-3 py-2.5 ${classes.border} border-b`}>
+          <div className={`flex rounded-xl overflow-hidden border ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
+            {TYPE_TABS.map((tab, i) => {
+              const isActive = activeTypeTab === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    const switching = activeTypeTab !== tab.id
+                    setActiveTypeTab(tab.id)
+                    if (switching) { setLoading(true); fetchPendingOrders() }
+                  }}
+                  className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 px-1 text-[11px] font-semibold transition-all duration-200 ${
+                    i !== 0 ? (isDark ? 'border-l border-gray-600' : 'border-l border-gray-200') : ''
+                  } ${
+                    isActive
+                      ? `bg-gradient-to-b ${tab.gradient} text-white`
+                      : isDark
+                        ? 'bg-gray-700/50 text-gray-400 hover:bg-gray-700'
+                        : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  <tab.icon className="w-3 h-3" />
+                  <span className="leading-tight text-center">{tab.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}
 
-      {showOrders ? (
+      {(!showTypeTabs || showOrders) ? (
         <>
       {/* Orders Section Header */}
       <div className="p-3 pb-0">

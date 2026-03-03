@@ -12,6 +12,7 @@ import VariantSelectionScreen from '../../components/test/VariantSelectionScreen
 import DealFlavorSelectionScreen from '../../components/test/DealFlavorSelectionScreen'
 import CartSidebar from '../../components/test/CartSidebar'
 import WalkinOrdersSidebar from '../../components/test/WalkinOrdersSidebar'
+import WalkinOrderDetails from '../../components/test/WalkinOrderDetails'
 import TableSelectionPanel from '../../components/test/TableSelectionPanel'
 import { Users, ShoppingBag, Truck, FileText } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
@@ -207,7 +208,7 @@ export default function NewOrderPage() {
 
   const handleOrderSelect = (order) => {
     setSelectedOrder(order)
-    setCurrentView('products')
+    setCurrentView('orders')
   }
 
   const handleTableClick = () => {
@@ -456,6 +457,42 @@ export default function NewOrderPage() {
         />
       )}
 
+      {currentView === 'orders' && selectedOrder && (
+        <WalkinOrderDetails
+          order={selectedOrder}
+          classes={classes}
+          isDark={isDark}
+          orderType={selectedOrder.order_type || activeOrderType}
+          onClose={() => {
+            setSelectedOrder(null)
+            setCurrentView('products')
+          }}
+          onPrint={() => notify.info('Use the Orders page to print')}
+          onPrintToken={() => notify.info('Use the Orders page to print token')}
+          onMarkReady={() => {
+            setOrdersRefreshTrigger(prev => prev + 1)
+            setSelectedOrder(null)
+            setCurrentView('products')
+          }}
+          onComplete={() => {
+            setOrdersRefreshTrigger(prev => prev + 1)
+            setSelectedOrder(null)
+            setCurrentView('products')
+          }}
+          onPaymentRequired={(order, paymentData) => {
+            setOrdersRefreshTrigger(prev => prev + 1)
+            setSelectedOrder(null)
+            setCurrentView('products')
+          }}
+          onConvertToDelivery={() => {
+            setOrdersRefreshTrigger(prev => prev + 1)
+            setSelectedOrder(null)
+            setCurrentView('products')
+            notify.success('Order converted! Check the delivery page.')
+          }}
+        />
+      )}
+
       {/* Right - Cart */}
       <CartSidebar
         cart={cart}
@@ -478,6 +515,8 @@ export default function NewOrderPage() {
         onCustomerChange={(c) => setCustomers(prev => ({ ...prev, [activeOrderType]: c }))}
         orderData={orderExtras[activeOrderType] || {}}
         onOrderDataChange={(data) => setOrderExtras(prev => ({ ...prev, [activeOrderType]: data }))}
+        selectedTable={activeOrderType === 'walkin' ? selectedTable : null}
+        onChangeTable={handleTableClick}
       />
 
       </div>{/* end flex flex-1 overflow-hidden */}

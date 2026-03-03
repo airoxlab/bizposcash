@@ -179,8 +179,8 @@ export default function CartSidebar({
       <div className={`p-2 ${classes.border} border-b ${isDark ? 'bg-gray-900/50' : 'bg-gray-50'}`}>
         <div className="flex items-center gap-1.5">
 
-          {/* Table Button */}
-          {selectedTable && (
+          {/* Table Button — LEFT position for classic pages (walkin/takeaway/delivery) */}
+          {!inlineCustomer && selectedTable && (
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -232,7 +232,7 @@ export default function CartSidebar({
                 }`}
               >
                 <User className="w-3 h-3" />
-                <span>{custMode === 'searching' ? 'Cancel' : 'Add Customer'}</span>
+                <span>{custMode === 'searching' ? 'Cancel' : selectedTable ? 'Customer' : 'Add Customer'}</span>
               </button>
             )
           )}
@@ -278,7 +278,7 @@ export default function CartSidebar({
                 setShowInstructionPanel(false)
               }
             }}
-            className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+            className={`${inlineCustomer && selectedTable ? 'flex-shrink-0' : 'flex-1'} flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
               orderInstructions
                 ? isDark ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-amber-50 border-amber-400 text-amber-700'
                 : isDark ? 'border-gray-600 text-gray-400 hover:border-amber-500 hover:text-amber-400' : 'border-gray-300 text-gray-500 hover:border-amber-400 hover:text-amber-600'
@@ -287,6 +287,21 @@ export default function CartSidebar({
             <FileText className="w-3 h-3" />
             <span>{orderInstructions ? 'Note ✓' : 'Note'}</span>
           </motion.button>
+
+          {/* Table Button — RIGHT position for modern new-order page only */}
+          {inlineCustomer && selectedTable && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onChangeTable}
+              className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                isDark ? 'bg-purple-900/30 border-purple-700 text-purple-300 hover:bg-purple-900/50' : 'bg-purple-50 border-purple-300 text-purple-700 hover:bg-purple-100'
+              }`}
+            >
+              <Table2 className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate max-w-[56px]">{selectedTable.table_name || selectedTable.table_number}</span>
+            </motion.button>
+          )}
         </div>
 
         {/* ── FULL-WIDTH CONTENT BELOW (search / customer fields / instruction) ── */}
