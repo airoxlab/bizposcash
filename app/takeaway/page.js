@@ -39,6 +39,7 @@ export default function TakeawayPage() {
   const [deals, setDeals] = useState(() => cacheManager.isReady() ? cacheManager.getDeals() : [])
   const [cart, setCart] = useState([])
   const [customer, setCustomer] = useState(null)
+  const [orderData, setOrderData] = useState({})
   const [orderInstructions, setOrderInstructions] = useState('')
   const [pickupTime, setPickupTime] = useState('')
   const [networkStatus, setNetworkStatus] = useState({ isOnline: true, unsyncedOrders: 0 })
@@ -2143,6 +2144,10 @@ export default function TakeawayPage() {
         orderType="takeaway"
         isReopenedOrder={isReopenedOrder}
         onUpdateItemInstruction={updateItemInstruction}
+        inlineCustomer={true}
+        onCustomerChange={setCustomer}
+        orderData={orderData}
+        onOrderDataChange={setOrderData}
       />
 
       <TakeawayCustomerForm

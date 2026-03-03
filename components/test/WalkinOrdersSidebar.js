@@ -27,7 +27,7 @@ export default function WalkinOrdersSidebar({
   onDealsClick
 }) {
   const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(!showTypeTabs)
   const [refreshing, setRefreshing] = useState(false)
   const [showOrders, setShowOrders] = useState(false)
   const listRef = useRef(null)
@@ -375,12 +375,12 @@ export default function WalkinOrdersSidebar({
   return (
     <div className={`w-64 h-full ${classes.card} ${classes.shadow} shadow-xl ${classes.border} border-r flex flex-col`}>
       {/* Header - Same as CategorySidebar */}
-      <div className={`p-4 ${classes.border} border-b ${classes.card}`}>
+      <div className={`px-2 py-2 ${classes.border} border-b ${classes.card}`}>
         <motion.button
           whileHover={{ x: -2 }}
           whileTap={{ scale: 0.98 }}
           onClick={onBackClick}
-          className={`flex items-center ${classes.textSecondary} hover:${classes.textPrimary} transition-colors mb-3 group`}
+          className={`flex items-center ${classes.textSecondary} hover:${classes.textPrimary} transition-colors mb-1.5 group`}
         >
           <div className={`w-8 h-8 rounded-full ${classes.button} group-hover:${classes.shadow} group-hover:shadow-sm flex items-center justify-center mr-3 transition-colors`}>
             <ArrowLeft className="w-4 h-4" />
@@ -388,7 +388,7 @@ export default function WalkinOrdersSidebar({
           <span className="font-medium text-sm">Back to Dashboard</span>
         </motion.button>
 
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-0">
           <div>
             <h2 className={`text-xl font-bold ${classes.textPrimary}`}>
               New Order
@@ -426,7 +426,7 @@ export default function WalkinOrdersSidebar({
             </motion.button>
 
             {/* Table Selection Icon - Only for walkin */}
-            {effectiveOrderType === 'walkin' && onTableClick && (
+            {orderType === 'walkin' && onTableClick && (
               <motion.button
                 whileHover={{ scale: 1.08 }}
                 whileTap={{ scale: 0.95 }}

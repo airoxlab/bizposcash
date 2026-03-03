@@ -278,7 +278,7 @@ export default function CartSidebar({
                 setShowInstructionPanel(false)
               }
             }}
-            className={`${inlineCustomer && selectedTable ? 'flex-shrink-0' : 'flex-1'} flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+            className={`${inlineCustomer && customer ? 'flex-shrink-0' : 'flex-1'} flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
               orderInstructions
                 ? isDark ? 'bg-amber-900/30 border-amber-600 text-amber-300' : 'bg-amber-50 border-amber-400 text-amber-700'
                 : isDark ? 'border-gray-600 text-gray-400 hover:border-amber-500 hover:text-amber-400' : 'border-gray-300 text-gray-500 hover:border-amber-400 hover:text-amber-600'
@@ -484,14 +484,14 @@ export default function CartSidebar({
                             setDraftItemInstructions(prev => ({ ...prev, [item.id]: item.itemInstructions || '' }))
                           }
                         }}
-                        className={`w-5 h-5 rounded flex items-center justify-center transition-all ${
+                        className={`w-6 h-6 rounded flex items-center justify-center transition-all ${
                           item.itemInstructions
-                            ? isDark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-500'
-                            : isDark ? 'bg-gray-700 text-gray-400 hover:text-amber-400' : 'bg-gray-50 text-gray-400 hover:text-amber-500'
+                            ? isDark ? 'bg-amber-500 text-white' : 'bg-amber-400 text-white'
+                            : isDark ? 'bg-amber-500/30 text-amber-400 hover:bg-amber-500 hover:text-white' : 'bg-amber-100 text-amber-500 hover:bg-amber-400 hover:text-white'
                         }`}
                         title="Item instructions"
                       >
-                        <MessageSquare className="w-2.5 h-2.5" />
+                        <MessageSquare className="w-3.5 h-3.5" />
                       </button>
                     </div>
 

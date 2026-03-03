@@ -41,6 +41,7 @@ export default function WalkInPage() {
   const [deals, setDeals] = useState(() => cacheManager.isReady() ? cacheManager.getDeals() : [])
   const [cart, setCart] = useState([])
   const [customer, setCustomer] = useState(null)
+  const [orderData, setOrderData] = useState({})
   const [orderInstructions, setOrderInstructions] = useState('')
   const [networkStatus, setNetworkStatus] = useState({ isOnline: true, unsyncedOrders: 0 })
   const [isDataReady, setIsDataReady] = useState(() => cacheManager.isReady())
@@ -2593,6 +2594,10 @@ export default function WalkInPage() {
         onChangeTable={() => setCurrentView('tables')}
         onInstructionsChange={setOrderInstructions}
         onUpdateItemInstruction={updateItemInstruction}
+        inlineCustomer={true}
+        onCustomerChange={setCustomer}
+        orderData={orderData}
+        onOrderDataChange={setOrderData}
       />
 
       {/* Customer Form */}

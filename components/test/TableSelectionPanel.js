@@ -97,6 +97,12 @@ export default function TableSelectionPanel({
   }
 
   const handleTableSelect = (table) => {
+    // If already selected, deselect it
+    if (selectedTable?.id === table.id) {
+      onSelectTable(null)
+      if (onClose) onClose()
+      return
+    }
     // Prevent selection of non-available tables
     if (table.status !== 'available') {
       return

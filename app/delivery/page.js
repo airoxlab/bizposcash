@@ -40,6 +40,7 @@ export default function DeliveryPage() {
   const [orderTypes, setOrderTypes] = useState([])
   const [cart, setCart] = useState([])
   const [customer, setCustomer] = useState(null)
+  const [orderData, setOrderData] = useState({})
   const [orderInstructions, setOrderInstructions] = useState('')
   const [deliveryTime, setDeliveryTime] = useState('')
   const [deliveryCharges, setDeliveryCharges] = useState(0)
@@ -2189,6 +2190,10 @@ export default function DeliveryPage() {
         orderType="delivery"
         isReopenedOrder={isReopenedOrder}
         onUpdateItemInstruction={updateItemInstruction}
+        inlineCustomer={true}
+        onCustomerChange={setCustomer}
+        orderData={orderData}
+        onOrderDataChange={setOrderData}
       />
 
       <DeliveryCustomerForm
