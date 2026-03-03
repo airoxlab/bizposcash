@@ -445,23 +445,6 @@ export default function CartSidebar({
                     </div>
                     <div className="flex items-center gap-0.5">
                       <button
-                        onClick={() => {
-                          const opening = expandedItemId !== item.id
-                          setExpandedItemId(opening ? item.id : null)
-                          if (opening) {
-                            setDraftItemInstructions(prev => ({ ...prev, [item.id]: item.itemInstructions || '' }))
-                          }
-                        }}
-                        className={`p-0.5 rounded transition-all ${
-                          item.itemInstructions
-                            ? isDark ? 'text-amber-400' : 'text-amber-500'
-                            : isDark ? 'text-gray-400 hover:text-amber-400' : 'text-gray-400 hover:text-amber-500'
-                        }`}
-                        title="Item instructions"
-                      >
-                        <MessageSquare className="w-2.5 h-2.5" />
-                      </button>
-                      <button
                         onClick={() => onRemoveItem(item.id)}
                         className={`p-0.5 text-red-400 hover:text-red-600 rounded transition-all`}
                       >
@@ -471,6 +454,7 @@ export default function CartSidebar({
                   </div>
 
                   <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1">
                     <div className={`flex items-center ${isDark ? 'bg-gray-700' : 'bg-gray-50'} rounded-md p-0.5`}>
                       <motion.button
                         whileHover={{ scale: 1.1 }}
@@ -491,6 +475,24 @@ export default function CartSidebar({
                       >
                         <Plus className="w-2.5 h-2.5" />
                       </motion.button>
+                    </div>
+                      <button
+                        onClick={() => {
+                          const opening = expandedItemId !== item.id
+                          setExpandedItemId(opening ? item.id : null)
+                          if (opening) {
+                            setDraftItemInstructions(prev => ({ ...prev, [item.id]: item.itemInstructions || '' }))
+                          }
+                        }}
+                        className={`w-5 h-5 rounded flex items-center justify-center transition-all ${
+                          item.itemInstructions
+                            ? isDark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-500'
+                            : isDark ? 'bg-gray-700 text-gray-400 hover:text-amber-400' : 'bg-gray-50 text-gray-400 hover:text-amber-500'
+                        }`}
+                        title="Item instructions"
+                      >
+                        <MessageSquare className="w-2.5 h-2.5" />
+                      </button>
                     </div>
 
                     <div className="text-right">

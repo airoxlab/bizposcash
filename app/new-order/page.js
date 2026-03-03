@@ -258,7 +258,22 @@ export default function NewOrderPage() {
   }
 
   const handleAddToCart = (cartItem) => {
-    setCarts(prev => ({ ...prev, [activeOrderType]: [...(prev[activeOrderType] || []), cartItem] }))
+    setCarts(prev => {
+      const currentCart = prev[activeOrderType] || []
+      const existingIndex = currentCart.findIndex(item => {
+        if (item.isDeal && cartItem.isDeal) return item.dealId === cartItem.dealId
+        if (!item.isDeal && !cartItem.isDeal) return item.productId === cartItem.productId && item.variantId === cartItem.variantId
+        return false
+      })
+      if (existingIndex !== -1) {
+        const updated = [...currentCart]
+        const existing = updated[existingIndex]
+        const newQty = existing.quantity + cartItem.quantity
+        updated[existingIndex] = { ...existing, quantity: newQty, totalPrice: existing.finalPrice * newQty }
+        return { ...prev, [activeOrderType]: updated }
+      }
+      return { ...prev, [activeOrderType]: [...currentCart, cartItem] }
+    })
     setCurrentView('products')
     setSelectedProduct(null)
     setSelectedDeal(null)
@@ -343,6 +358,16 @@ export default function NewOrderPage() {
       ...extras
     }
     localStorage.setItem('order_data', JSON.stringify(orderData))
+
+    // Clear this order type's cart so returning to the page starts fresh
+    const tab = ORDER_TABS.find(t => t.id === activeOrderType)
+    if (tab) {
+      localStorage.removeItem(`${tab.storageKey}_cart`)
+      localStorage.removeItem(`${tab.storageKey}_instructions`)
+    }
+    setCarts(prev => ({ ...prev, [activeOrderType]: [] }))
+    setInstructions(prev => ({ ...prev, [activeOrderType]: '' }))
+
     notify.info('Proceeding to payment...')
     router.push('/payment')
   }
