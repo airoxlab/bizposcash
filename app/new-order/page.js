@@ -101,13 +101,6 @@ export default function NewOrderPage() {
   }, [carts])
 
   useEffect(() => {
-    ORDER_TABS.forEach(tab => {
-      const c = customers[tab.id]
-      if (c) localStorage.setItem(`${tab.storageKey}_customer`, JSON.stringify(c))
-    })
-  }, [customers])
-
-  useEffect(() => {
     localStorage.setItem('new_order_active_type', activeOrderType)
   }, [activeOrderType])
 
@@ -138,10 +131,8 @@ export default function NewOrderPage() {
 
     ORDER_TABS.forEach(tab => {
       const savedCart = localStorage.getItem(`${tab.storageKey}_cart`)
-      const savedCustomer = localStorage.getItem(`${tab.storageKey}_customer`)
       const savedInstr = localStorage.getItem(`${tab.storageKey}_instructions`)
       if (savedCart) try { restoredCarts[tab.id] = JSON.parse(savedCart) } catch {}
-      if (savedCustomer) try { restoredCustomers[tab.id] = JSON.parse(savedCustomer) } catch {}
       if (savedInstr) restoredInstructions[tab.id] = savedInstr
     })
 
@@ -407,6 +398,11 @@ export default function NewOrderPage() {
           orderType={activeOrderType}
           refreshTrigger={ordersRefreshTrigger}
           showTypeTabs={true}
+          categories={categories}
+          allProducts={allProducts}
+          deals={deals}
+          onCategoryClick={(id) => productGridRef.current?.scrollToCategory(id)}
+          onDealsClick={() => productGridRef.current?.scrollToDeals()}
         />
 
       {/* Center - Dynamic Content */}

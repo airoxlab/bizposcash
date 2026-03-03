@@ -17,13 +17,19 @@ export default function WalkinOrdersSidebar({
   onTableClick,
   selectedTable,
   onBackClick,
-  orderType = 'walkin', // 'walkin' or 'takeaway'
-  refreshTrigger = 0, // Increment to trigger a refresh
-  showTypeTabs = false // When true, shows Walk-in/Takeaway/Delivery tab switcher
+  orderType = 'walkin',
+  refreshTrigger = 0,
+  showTypeTabs = false,
+  categories = [],
+  allProducts = [],
+  deals = [],
+  onCategoryClick,
+  onDealsClick
 }) {
   const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [showOrders, setShowOrders] = useState(false)
   const listRef = useRef(null)
   const [activeTypeTab, setActiveTypeTab] = useState(orderType)
   const effectiveOrderType = showTypeTabs ? activeTypeTab : orderType
@@ -53,13 +59,11 @@ export default function WalkinOrdersSidebar({
   }, [])
 
   useEffect(() => {
-    fetchPendingOrders()
-
     // 🆕 CRITICAL FIX: Listen for order updates from cache
     const handleOrdersUpdated = (event) => {
       console.log('📡 [WalkinOrdersSidebar] Orders updated event received:', event.detail)
-      // Only refresh if the order type matches
-      if (event.detail?.orderType === effectiveOrderType) {
+      // Only refresh if orders panel is open and order type matches
+      if (showOrders && event.detail?.orderType === effectiveOrderType) {
         console.log('🔄 [WalkinOrdersSidebar] Auto-refreshing orders due to cache update')
         fetchPendingOrders()
       }
@@ -430,9 +434,17 @@ export default function WalkinOrdersSidebar({
             {TYPE_TABS.map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTypeTab(tab.id)}
+                onClick={() => {
+                  const switching = activeTypeTab !== tab.id
+                  setActiveTypeTab(tab.id)
+                  setShowOrders(true)
+                  if (switching || !showOrders) {
+                    setLoading(true)
+                    fetchPendingOrders()
+                  }
+                }}
                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
-                  activeTypeTab === tab.id
+                  activeTypeTab === tab.id && showOrders
                     ? `bg-gradient-to-r ${tab.gradient} text-white shadow-sm scale-105`
                     : isDark
                       ? 'bg-gray-700 text-gray-400 hover:bg-gray-600 border border-gray-600'
@@ -447,6 +459,8 @@ export default function WalkinOrdersSidebar({
         </div>
       )}
 
+      {showOrders ? (
+        <>
       {/* Orders Section Header */}
       <div className="p-3 pb-0">
         <div className="flex items-center justify-between mb-3">
@@ -467,7 +481,7 @@ export default function WalkinOrdersSidebar({
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={onClose}
+              onClick={() => setShowOrders(false)}
               className={`p-1.5 rounded-md transition-all ${isDark ? 'bg-red-900/40 hover:bg-red-900/60' : 'bg-red-50 hover:bg-red-100'}`}
               title="Close orders view"
             >
@@ -615,6 +629,76 @@ export default function WalkinOrdersSidebar({
           </div>
         )}
       </div>
+        </>
+      ) : (
+        /* Product categories list */
+        <div ref={listRef} className="flex-1 overflow-y-scroll p-3" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+          <p className={`text-xs font-semibold uppercase tracking-wider mb-2 px-1 ${classes.textSecondary}`}>
+            Categories
+          </p>
+          <div className="space-y-2">
+            {categories.map(cat => {
+              const count = allProducts.filter(p => p.category_id === cat.id).length
+              return (
+                <motion.button
+                  key={cat.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => onCategoryClick?.(cat.id)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all duration-150 ${
+                    isDark ? 'bg-gray-700/60 hover:bg-gray-700' : 'bg-gray-100 hover:bg-gray-200'
+                  }`}
+                >
+                  {/* Image */}
+                  <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
+                    {cat.image_url ? (
+                      <img
+                        src={cacheManager.getImageUrl(cat.image_url)}
+                        alt={cat.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className={`w-full h-full flex items-center justify-center ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`}>
+                        <Coffee className={`w-5 h-5 ${classes.textSecondary}`} />
+                      </div>
+                    )}
+                  </div>
+                  {/* Text */}
+                  <div className="min-w-0">
+                    <div className={`font-semibold text-sm truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                      {cat.name}
+                    </div>
+                    <div className={`text-xs ${classes.textSecondary}`}>{count} item{count !== 1 ? 's' : ''}</div>
+                  </div>
+                </motion.button>
+              )
+            })}
+
+            {deals?.length > 0 && (
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => onDealsClick?.()}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all duration-150 ${
+                  isDark ? 'bg-yellow-900/30 hover:bg-yellow-900/50' : 'bg-yellow-50 hover:bg-yellow-100'
+                }`}
+              >
+                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xl">🎁</span>
+                </div>
+                <div className="min-w-0">
+                  <div className={`font-semibold text-sm ${isDark ? 'text-yellow-300' : 'text-yellow-700'}`}>Special Deals</div>
+                  <div className={`text-xs ${classes.textSecondary}`}>{deals.length} deal{deals.length !== 1 ? 's' : ''}</div>
+                </div>
+              </motion.button>
+            )}
+
+            {categories.length === 0 && (
+              <p className={`text-xs text-center py-8 ${classes.textSecondary}`}>No categories yet</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
