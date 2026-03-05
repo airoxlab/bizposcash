@@ -44,6 +44,9 @@ async function printKitchenToken(ip, port, orderData, userProfile) {
       // ORDER INFO - Left-Right aligned
       // ========================================
       const orderNumber = orderData.orderNumber || 'N/A';
+      const formattedSerial = orderData.dailySerial
+        ? `#${String(orderData.dailySerial).padStart(3, '0')}`
+        : null;
       const orderDate = new Date();
       const formattedDate = orderDate.toLocaleDateString('en-GB', {
         day: '2-digit',
@@ -59,8 +62,14 @@ async function printKitchenToken(ip, port, orderData, userProfile) {
 
       await printer.alignCenter();
       await printer.bold(true);
-      await printer.leftRight("Token #", orderNumber);
-      await printer.bold(false);
+      if (formattedSerial) {
+        await printer.leftRight("Token #", formattedSerial);
+        await printer.bold(false);
+        await printer.leftRight("Ref:", orderNumber);
+      } else {
+        await printer.leftRight("Token #", orderNumber);
+        await printer.bold(false);
+      }
       await printer.leftRight("Date:", formattedDate);
       await printer.leftRight("Time:", formattedTime);
       await printer.leftRight("Type:", orderType);
@@ -171,6 +180,15 @@ async function printKitchenToken(ip, port, orderData, userProfile) {
         await printer.bold(false);
         await printer.alignCenter();
         await printer.drawLine();
+        const deliveryAddr = orderData.deliveryAddress || orderData.customerAddress;
+        if (deliveryAddr) {
+          await printer.alignLeft();
+          await printer.bold(true);
+          await printer.println("Address:");
+          await printer.bold(false);
+          await printer.println(`  ${deliveryAddr}`);
+          await printer.drawLine();
+        }
       } else if (orderData.orderType === 'takeaway') {
         await printer.alignCenter();
         await printer.bold(true);

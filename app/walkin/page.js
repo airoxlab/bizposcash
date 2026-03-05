@@ -1185,6 +1185,7 @@ export default function WalkInPage() {
 
         const orderData = {
           orderNumber: order.order_number,
+          dailySerial: order.daily_serial || null,
           total: order.total_amount,
           subtotal: order.subtotal || order.total_amount,
           paymentMethod: 'Split',
@@ -1230,6 +1231,7 @@ export default function WalkInPage() {
           .update({
             payment_method: paymentData.paymentMethod,
             payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
             discount_amount: paymentData.discountAmount || 0,
             discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
             total_amount: paymentData.newTotal,
@@ -1259,6 +1261,7 @@ export default function WalkInPage() {
             ...cacheManager.cache.orders[orderIndex],
             payment_method: paymentData.paymentMethod,
             payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
             discount_amount: paymentData.discountAmount || 0,
             discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
             total_amount: paymentData.newTotal,
@@ -1380,6 +1383,16 @@ export default function WalkInPage() {
           console.error('❌ [Walkin Payment] Failed to handle customer ledger:', ledgerError)
           // Don't fail the payment if ledger update fails
         }
+      }
+
+      // Payment-only: update selectedOrder in state and return — no modal, stays in order details
+      if (paymentData.completeOrder === false) {
+        setSelectedOrder(prev => prev?.id === order.id
+          ? { ...prev, payment_status: 'Paid', payment_method: paymentData.paymentMethod, amount_paid: paymentData.newTotal, total_amount: paymentData.newTotal }
+          : prev)
+        toast.success('Payment recorded successfully')
+        setOrdersRefreshTrigger(prev => prev + 1)
+        return
       }
 
       // Fetch loyalty redemption for this order
@@ -1539,6 +1552,7 @@ export default function WalkInPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         total: paymentData.newTotal,
         subtotal: order.subtotal || paymentData.newTotal,
         paymentMethod: paymentData.paymentMethod,
@@ -1610,16 +1624,18 @@ export default function WalkInPage() {
       // Play beep sound
       playBeepSound()
 
-      // Mark order as completed (this happens in background, modal stays visible)
-      handleOrderStatusUpdate(order, 'Completed').catch(err => {
-        console.error('Error updating order status:', err)
-      })
+      // Mark order as completed only if user chose "Paid + Complete"
+      if (paymentData.completeOrder !== false) {
+        handleOrderStatusUpdate(order, 'Completed').catch(err => {
+          console.error('Error updating order status:', err)
+        })
+      }
 
       // Refresh orders list
       setOrdersRefreshTrigger(prev => prev + 1)
 
     } catch (error) {
-      console.error('Error completing payment:', error)
+      toast.error(`Payment failed: ${error?.message}`)
       notify.error(`Failed to complete payment: ${error.message}`)
     }
   }
@@ -1776,6 +1792,7 @@ export default function WalkInPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         total: order.total_amount || order.subtotal || 0,
         subtotal: order.subtotal || order.total_amount || 0,
         paymentMethod: order.payment_method || 'Cash',
@@ -1984,6 +2001,7 @@ export default function WalkInPage() {
       // Prepare order data for printing
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         orderType: order.order_type || 'walkin',
         customer: order.customers || { full_name: 'Guest' },
         deliveryAddress: order.delivery_address,
@@ -2201,6 +2219,7 @@ export default function WalkInPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         orderType: order.order_type || 'walkin',
         customerName: order.customers?.full_name || '',
         customerPhone: order.customers?.phone || '',
@@ -2284,6 +2303,10 @@ export default function WalkInPage() {
     localStorage.removeItem('walkin_modifying_order_number')
     localStorage.removeItem('walkin_original_state')
     localStorage.removeItem('walkin_original_order_status')
+    localStorage.removeItem('walkin_original_payment_status')
+    localStorage.removeItem('walkin_original_amount_paid')
+    localStorage.removeItem('walkin_original_payment_method')
+    localStorage.removeItem('walkin_can_decrease_qty')
   }
 
   const handleConfirmExit = () => {
@@ -2553,8 +2576,8 @@ export default function WalkInPage() {
           order={selectedOrder}
           classes={classes}
           isDark={isDark}
-          onPrint={handlePrintOrder}
-          onPrintToken={handlePrintToken}
+          onPrint={null}
+          onPrintToken={null}
           onMarkReady={(order) => handleOrderStatusUpdate(order, 'Ready')}
           onComplete={handleCompleteAlreadyPaidOrder}
           onPaymentRequired={handlePaymentRequired}

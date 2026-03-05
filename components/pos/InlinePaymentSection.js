@@ -7,6 +7,7 @@ import {
   Smartphone,
   Building,
   CheckCircle,
+  CreditCard,
   AlertTriangle,
   Tag,
   X,
@@ -126,7 +127,8 @@ export default function InlinePaymentSection({
     setDiscountAmount(newDiscountAmount)
 
     if (order) {
-      const newTotal = Math.max(0, originalSubtotal - newDiscountAmount)
+      const deliveryCharges = order?.delivery_charges || 0
+      const newTotal = Math.max(0, originalSubtotal - newDiscountAmount) + deliveryCharges
       setCashAmount(newTotal.toString())
     }
   }, [discountType, discountValue, originalSubtotal])
@@ -169,7 +171,8 @@ export default function InlinePaymentSection({
   const getCurrentTotal = () => {
     // Get loyalty discount from order
     const loyaltyDiscount = order?.loyalty_discount_amount || order?.loyaltyDiscountAmount || 0
-    return Math.max(0, originalSubtotal - discountAmount - loyaltyDiscount)
+    const deliveryCharges = order?.delivery_charges || 0
+    return Math.max(0, originalSubtotal - discountAmount - loyaltyDiscount) + deliveryCharges
   }
 
   const quickAmounts = order ? generateQuickAmounts(getCurrentTotal()) : []
@@ -208,8 +211,12 @@ export default function InlinePaymentSection({
     return true
   }
 
-  const handlePayment = async () => {
-    if (!canProcessPayment()) return
+  const handlePayment = async (completeOrder = true) => {
+    console.log('[DEBUG] handlePayment called', { completeOrder, canProcess: canProcessPayment(), selectedPaymentMethod: selectedPaymentMethod?.name })
+    if (!canProcessPayment()) {
+      console.log('[DEBUG] canProcessPayment() returned false — button disabled, returning early')
+      return
+    }
 
     setIsProcessing(true)
 
@@ -221,12 +228,15 @@ export default function InlinePaymentSection({
         discountType,
         discountValue,
         discountAmount,
-        newTotal: getCurrentTotal()
+        newTotal: getCurrentTotal(),
+        completeOrder
       }
 
+      console.log('[DEBUG] calling onPaymentComplete with paymentData:', paymentData)
       await onPaymentComplete(paymentData)
+      console.log('[DEBUG] onPaymentComplete finished')
     } catch (error) {
-      console.error('Payment error:', error)
+      console.error('[DEBUG] Payment error in handlePayment:', error)
     } finally {
       setIsProcessing(false)
     }
@@ -504,6 +514,12 @@ export default function InlinePaymentSection({
                 <span className="font-semibold">-Rs {(order.loyalty_discount_amount || order.loyaltyDiscountAmount || 0).toFixed(2)}</span>
               </div>
             )}
+            {(order.delivery_charges || 0) > 0 && (
+              <div className={`flex justify-between text-xs ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>
+                <span>Delivery Charges:</span>
+                <span className="font-semibold">+Rs {(order.delivery_charges || 0).toFixed(2)}</span>
+              </div>
+            )}
             <div className={`flex justify-between font-bold ${classes.textPrimary} border-t ${classes.border} pt-1.5 mt-1`}>
               <span className="text-sm">Total:</span>
               <span className="text-lg text-green-600">Rs {getCurrentTotal().toFixed(2)}</span>
@@ -522,7 +538,7 @@ export default function InlinePaymentSection({
 
       {/* Footer - Action Buttons */}
       <div className={`${classes.card} ${classes.border} border-t p-3`}>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button
             onClick={onCancel}
             className={`py-2 rounded-lg font-semibold text-sm ${classes.button} transition-all`}
@@ -530,9 +546,30 @@ export default function InlinePaymentSection({
             Cancel
           </button>
           <button
-            onClick={handlePayment}
+            onClick={() => handlePayment(false)}
             disabled={!canProcessPayment() || isProcessing}
-            className={`py-2 rounded-lg font-semibold text-sm transition-all ${
+            className={`py-2 rounded-lg font-semibold text-xs transition-all ${
+              canProcessPayment() && !isProcessing
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                : `${isDark ? 'bg-gray-600 text-gray-400' : 'bg-gray-300 text-gray-500'} cursor-not-allowed`
+            }`}
+          >
+            {isProcessing ? (
+              <div className="flex items-center justify-center">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                Processing...
+              </div>
+            ) : (
+              <>
+                <CreditCard className="w-3.5 h-3.5 inline mr-1" />
+                Mark Paid
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => handlePayment(true)}
+            disabled={!canProcessPayment() || isProcessing}
+            className={`py-2 rounded-lg font-semibold text-xs transition-all ${
               canProcessPayment() && !isProcessing
                 ? 'bg-green-600 hover:bg-green-700 text-white'
                 : `${isDark ? 'bg-gray-600 text-gray-400' : 'bg-gray-300 text-gray-500'} cursor-not-allowed`
@@ -540,13 +577,13 @@ export default function InlinePaymentSection({
           >
             {isProcessing ? (
               <div className="flex items-center justify-center">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
                 Processing...
               </div>
             ) : (
               <>
-                <CheckCircle className="w-4 h-4 inline mr-1.5" />
-                Complete
+                <CheckCircle className="w-3.5 h-3.5 inline mr-1" />
+                Paid + Complete
               </>
             )}
           </button>

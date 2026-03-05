@@ -322,7 +322,8 @@ export default function KDSPage() {
                 variant_name,
                 quantity,
                 is_deal,
-                deal_products
+                deal_products,
+                item_instructions
               ),
               customers (
                 full_name,
@@ -782,6 +783,7 @@ export default function KDSPage() {
             name: item.product_name || item.deal_name,
             quantity: item.quantity,
             dealProducts: dealProducts,
+            instructions: item.item_instructions || item.instructions || '',
           }
         }
         return {
@@ -789,6 +791,7 @@ export default function KDSPage() {
           name: item.product_name || item.deal_name,
           size: item.variant_name || '',
           quantity: item.quantity,
+          instructions: item.item_instructions || item.instructions || '',
         }
       })
 
@@ -799,6 +802,7 @@ export default function KDSPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         orderType: order.order_type || 'walkin',
         customerName: order.customers?.full_name || '',
         customerPhone: order.customers?.phone || '',
@@ -1502,12 +1506,12 @@ export default function KDSPage() {
                         key={index}
                         className={`px-3 py-2.5 text-sm ${index !== orderItems.length - 1 ? `border-b ${classes.border}` : ''}`}
                       >
-                        {/* Item header row */}
-                        <div className="grid grid-cols-12 gap-2 items-center">
-                          <div className={`col-span-1 font-bold ${classes.textPrimary}`}>
+                        {/* Item row: Qty | Name | Details (variant + instructions) */}
+                        <div className="grid grid-cols-12 gap-2 items-start">
+                          <div className={`col-span-1 font-bold ${classes.textPrimary} pt-0.5`}>
                             {item.quantity}x
                           </div>
-                          <div className={`col-span-11 ${classes.textPrimary} font-medium flex items-center gap-2`}>
+                          <div className={`col-span-7 ${classes.textPrimary} font-medium flex items-center gap-2`}>
                             {item.product_name || item.deal_name}
                             {item.is_deal && (
                               <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${isDark ? 'bg-purple-900/60 text-purple-300' : 'bg-purple-100 text-purple-600'}`}>
@@ -1515,46 +1519,38 @@ export default function KDSPage() {
                               </span>
                             )}
                           </div>
-                        </div>
-
-                        {/* Regular item: variant / flavor */}
-                        {!item.is_deal && (item.variant_name || item.flavor_name) && (
-                          <div className={`pl-8 mt-0.5 text-xs ${classes.textSecondary}`}>
-                            {item.variant_name && <span className="mr-2">Size: {item.variant_name}</span>}
-                            {item.flavor_name && <span>Flavor: {item.flavor_name}</span>}
-                          </div>
-                        )}
-                        {!item.is_deal && !item.variant_name && !item.flavor_name && (
-                          <div className={`pl-8 mt-0.5 text-xs ${classes.textSecondary}`}>-</div>
-                        )}
-
-                        {/* Deal item: expand sub-products with variants */}
-                        {item.is_deal && dealProducts.length > 0 && (
-                          <div className={`mt-1.5 ml-7 pl-2 border-l-2 ${isDark ? 'border-purple-700' : 'border-purple-300'} space-y-1`}>
-                            {dealProducts.map((dp, dpIndex) => (
-                              <div key={dpIndex} className={`text-xs flex items-start gap-1.5 ${classes.textPrimary}`}>
-                                <span className="font-bold text-green-600 dark:text-green-400 w-5 flex-shrink-0">{dp.quantity}x</span>
-                                <span className="flex-1">
-                                  {dp.name}
-                                  {dp.variant && (
-                                    <span className={`${classes.textSecondary} ml-1`}>— {dp.variant}</span>
-                                  )}
-                                </span>
+                          <div className="col-span-4 text-xs space-y-1">
+                            {/* Variant / flavor */}
+                            {!item.is_deal && (item.variant_name || item.flavor_name) && (
+                              <div className={classes.textSecondary}>
+                                {item.variant_name && <span className="mr-1">{item.variant_name}</span>}
+                                {item.flavor_name && <span>{item.flavor_name}</span>}
                               </div>
-                            ))}
+                            )}
+                            {/* Deal sub-products */}
+                            {item.is_deal && dealProducts.length > 0 && (
+                              <div className="space-y-0.5">
+                                {dealProducts.map((dp, dpIndex) => (
+                                  <div key={dpIndex} className={`flex items-start gap-1 ${classes.textPrimary}`}>
+                                    <span className="font-bold text-green-600 dark:text-green-400">{dp.quantity}x</span>
+                                    <span>{dp.name}{dp.variant && <span className={`${classes.textSecondary} ml-1`}>— {dp.variant}</span>}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {/* Item instructions */}
+                            {item.item_instructions && (
+                              <div className={`flex items-start gap-1 px-1.5 py-1 rounded font-medium ${isDark ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'}`}>
+                                <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                <span>{item.item_instructions}</span>
+                              </div>
+                            )}
+                            {/* Empty state */}
+                            {!item.item_instructions && !item.variant_name && !item.flavor_name && !(item.is_deal && dealProducts.length > 0) && (
+                              <span className={classes.textSecondary}>-</span>
+                            )}
                           </div>
-                        )}
-                        {item.is_deal && dealProducts.length === 0 && (
-                          <div className={`pl-8 mt-0.5 text-xs ${classes.textSecondary}`}>No item details</div>
-                        )}
-
-                        {/* Special instructions */}
-                        {item.special_instructions && (
-                          <div className={`text-xs mt-1.5 p-1.5 rounded ${isDark ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'}`}>
-                            <AlertTriangle className="w-3 h-3 inline mr-1" />
-                            {item.special_instructions}
-                          </div>
-                        )}
+                        </div>
                       </div>
                     )
                   })}

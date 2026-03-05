@@ -84,6 +84,35 @@ export default function DeliveryPage() {
     }
   }, [cart, customer, orderInstructions, deliveryTime, deliveryCharges, isReopenedOrder, originalOrderId])
 
+  // Sync inline panel orderData fields → individual state variables
+  // The InlineCustomerPanel writes deliveryCharges/deliveryTime/instructions to orderData state,
+  // but handleOrderAndPay and calculateTotal read from the individual state variables.
+  useEffect(() => {
+    if (orderData.deliveryCharges !== undefined) {
+      setDeliveryCharges(parseFloat(orderData.deliveryCharges) || 0)
+    }
+  }, [orderData.deliveryCharges])
+
+  useEffect(() => {
+    if (orderData.deliveryTime) {
+      setDeliveryTime(orderData.deliveryTime)
+    }
+  }, [orderData.deliveryTime])
+
+  useEffect(() => {
+    if (orderData.instructions !== undefined) {
+      setOrderInstructions(orderData.instructions || '')
+    }
+  }, [orderData.instructions])
+
+  // Persist orderData (inline panel fields) to localStorage so it survives navigation
+  // No cart-length guard — user may fill delivery details before adding items
+  useEffect(() => {
+    if (Object.keys(orderData).length > 0) {
+      localStorage.setItem('delivery_order_data', JSON.stringify(orderData))
+    }
+  }, [orderData])
+
   // Listen for reloadCart event (when reopening from same page)
   useEffect(() => {
     const handleReloadCart = (event) => {
@@ -111,11 +140,15 @@ export default function DeliveryPage() {
       }
       if (savedInstructions) setOrderInstructions(savedInstructions)
       if (savedDeliveryTime) setDeliveryTime(savedDeliveryTime)
-      if (savedDeliveryCharges) setDeliveryCharges(savedDeliveryCharges)
+      if (savedDeliveryCharges) setDeliveryCharges(parseFloat(savedDeliveryCharges) || 0)
       if (savedModifyingOrderId && savedModifyingOrderId !== 'undefined') {
         setIsReopenedOrder(true)
         setOriginalOrderId(savedModifyingOrderId)
         console.log('✅ [Delivery] Reopen state set:', savedModifyingOrderId)
+      }
+      const savedOrderData = localStorage.getItem('delivery_order_data')
+      if (savedOrderData) {
+        try { setOrderData(JSON.parse(savedOrderData)) } catch {}
       }
     }
 
@@ -202,6 +235,10 @@ export default function DeliveryPage() {
         setIsReopenedOrder(true)
         setOriginalOrderId(savedModifyingOrderId)
         console.log('✅ [Delivery] Reopen state set from loadOrderDataFromStorage')
+      }
+      const savedOrderData = localStorage.getItem('delivery_order_data')
+      if (savedOrderData) {
+        try { setOrderData(JSON.parse(savedOrderData)) } catch {}
       }
     }
 
@@ -890,6 +927,7 @@ export default function DeliveryPage() {
           .update({
             payment_method: paymentData.paymentMethod,
             payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
             discount_amount: paymentData.discountAmount || 0,
             discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
             total_amount: paymentData.newTotal,
@@ -910,6 +948,7 @@ export default function DeliveryPage() {
             ...cacheManager.cache.orders[orderIndex],
             payment_method: paymentData.paymentMethod,
             payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
             discount_amount: paymentData.discountAmount || 0,
             discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
             total_amount: paymentData.newTotal,
@@ -1033,6 +1072,16 @@ export default function DeliveryPage() {
           console.error('❌ [Delivery Payment] Failed to handle customer ledger:', ledgerError)
           // Don't fail the payment if ledger update fails
         }
+      }
+
+      // Payment-only: update selectedOrder in state and return — no modal, stays in order details
+      if (paymentData.completeOrder === false) {
+        setSelectedOrder(prev => prev?.id === order.id
+          ? { ...prev, payment_status: 'Paid', payment_method: paymentData.paymentMethod, amount_paid: paymentData.newTotal, total_amount: paymentData.newTotal }
+          : prev)
+        notify.success('Payment recorded successfully')
+        setOrdersRefreshTrigger(prev => prev + 1)
+        return
       }
 
       // Fetch loyalty redemption for this order
@@ -1195,6 +1244,7 @@ export default function DeliveryPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         total: paymentData.newTotal,
         subtotal: order.subtotal || paymentData.newTotal,
         paymentMethod: paymentData.paymentMethod,
@@ -1222,10 +1272,12 @@ export default function DeliveryPage() {
       // Play beep sound
       playBeepSound()
 
-      // Mark order as completed (this happens in background, modal stays visible)
-      handleOrderStatusUpdate(order, 'Completed').catch(err => {
-        console.error('Error updating order status:', err)
-      })
+      // Mark order as completed only if user chose "Paid + Complete"
+      if (paymentData.completeOrder !== false) {
+        handleOrderStatusUpdate(order, 'Completed').catch(err => {
+          console.error('Error updating order status:', err)
+        })
+      }
 
       // Refresh orders list
       setOrdersRefreshTrigger(prev => prev + 1)
@@ -1392,6 +1444,7 @@ export default function DeliveryPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         total: order.total_amount || order.subtotal || 0,
         subtotal: order.subtotal || order.total_amount || 0,
         paymentMethod: order.payment_method || 'Cash',
@@ -1631,9 +1684,10 @@ export default function DeliveryPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         orderType: order.order_type || 'delivery',
         customer: order.customers || { full_name: order.customer_name, phone: order.customer_phone },
-        deliveryAddress: order.customers?.addressline || order.delivery_address,
+        deliveryAddress: order.delivery_address || order.customers?.addressline || order.customers?.address,
         orderInstructions: order.order_instructions,
         total: order.total_amount,
         subtotal: order.subtotal,
@@ -1804,10 +1858,12 @@ export default function DeliveryPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         orderType: order.order_type || 'delivery',
         customerName: order.customers?.full_name || order.customer_name || '',
         customerPhone: order.customers?.phone || order.customer_phone || '',
         specialNotes: order.order_instructions || '',
+        deliveryAddress: order.delivery_address || order.customers?.addressline || order.customers?.address || '',
         items: mappedItems,
       }
 
@@ -1899,6 +1955,13 @@ export default function DeliveryPage() {
     localStorage.removeItem('delivery_modifying_order')
     localStorage.removeItem('delivery_modifying_order_number')
     localStorage.removeItem('delivery_original_state')
+    localStorage.removeItem('delivery_order_data')
+    localStorage.removeItem('delivery_discount')
+    localStorage.removeItem('delivery_original_order_status')
+    localStorage.removeItem('delivery_original_payment_status')
+    localStorage.removeItem('delivery_original_amount_paid')
+    localStorage.removeItem('delivery_original_payment_method')
+    localStorage.removeItem('delivery_can_decrease_qty')
   }
 
   const handleConfirmExit = () => {
@@ -1931,16 +1994,23 @@ export default function DeliveryPage() {
       console.log('✅ [Delivery] order_type_id:', orderTypeId)
     }
 
-    const orderData = {
+    // Read inline panel fields from orderData state (falls back to individual state variables)
+    const effectiveDeliveryCharges = parseFloat(orderData.deliveryCharges) || parseFloat(deliveryCharges) || 0
+    const effectiveDeliveryTime = orderData.deliveryTime || deliveryTime
+    const effectiveDeliveryAddress = orderData.addressLine || customer?.addressline || customer?.address || ''
+    const effectiveDeliveryBoyId = orderData.deliveryBoyId || localStorage.getItem('delivery_boy_id') || null
+    const effectiveOrderInstructions = orderData.instructions !== undefined ? orderData.instructions : orderInstructions
+
+    const orderPayload = {
       cart,
       customer,
-      orderInstructions,
-      deliveryAddress: customer?.addressline || customer?.address || '',
-      deliveryTime,
-      deliveryCharges,
-      deliveryBoyId: localStorage.getItem('delivery_boy_id') || null,
+      orderInstructions: effectiveOrderInstructions,
+      deliveryAddress: effectiveDeliveryAddress,
+      deliveryTime: effectiveDeliveryTime,
+      deliveryCharges: effectiveDeliveryCharges,
+      deliveryBoyId: effectiveDeliveryBoyId,
       subtotal: calculateSubtotal(),
-      total: calculateTotal(),
+      total: calculateSubtotal() + effectiveDeliveryCharges,
       orderType: 'delivery',
       orderTypeId: orderTypeId, // 🆕 Added order_type_id for inventory deduction
       cashierId: cashierData?.id || null,
@@ -1956,7 +2026,7 @@ export default function DeliveryPage() {
       originalOrderStatus: localStorage.getItem('delivery_original_order_status') || null
     }
 
-    console.log('🔵 [Delivery] Order data prepared:', orderData)
+    console.log('🔵 [Delivery] Order data prepared:', orderPayload)
 
     if (isReopenedOrder && originalOrderId) {
       const originalStateStr = localStorage.getItem('delivery_original_state')
@@ -1968,9 +2038,9 @@ export default function DeliveryPage() {
           itemsRemoved: [],
           itemsModified: [],
           oldSubtotal: originalState.subtotal,
-          newSubtotal: orderData.subtotal,
+          newSubtotal: orderPayload.subtotal,
           oldTotal: originalState.total,
-          newTotal: orderData.total,
+          newTotal: orderPayload.total,
           oldItemCount: originalState.itemCount,
           newItemCount: cart.length
         }
@@ -2024,12 +2094,12 @@ export default function DeliveryPage() {
           }
         })
 
-        orderData.detailedChanges = changes
+        orderPayload.detailedChanges = changes
       }
     }
 
     console.log('🔵 [Delivery] Saving order_data to localStorage')
-    localStorage.setItem('order_data', JSON.stringify(orderData))
+    localStorage.setItem('order_data', JSON.stringify(orderPayload))
     console.log('🔵 [Delivery] Navigating to payment page')
     notify.info('Proceeding to payment...')
     router.push('/payment')
@@ -2154,8 +2224,8 @@ export default function DeliveryPage() {
           order={selectedOrder}
           classes={classes}
           isDark={isDark}
-          onPrint={handlePrintOrder}
-          onPrintToken={handlePrintToken}
+          onPrint={null}
+          onPrintToken={null}
           onMarkReady={(order) => handleOrderStatusUpdate(order, 'Ready')}
           onComplete={handleCompleteAlreadyPaidOrder}
           onPaymentRequired={handlePaymentRequired}

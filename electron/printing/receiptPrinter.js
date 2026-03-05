@@ -132,12 +132,18 @@ async function printReceipt(ip, port, orderData, userProfile) {
       // ORDER DETAILS
       // ========================================
       const orderNumber = orderData.orderNumber || 'N/A';
+      const formattedSerial = orderData.dailySerial
+        ? `#${String(orderData.dailySerial).padStart(3, '0')}`
+        : null;
       const orderDate = new Date();
       const dateStr = orderDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       const timeStr = orderDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
       await printer.alignCenter();
       await printer.leftRight("Invoice:", `#${orderNumber}`);
+      if (formattedSerial) {
+        await printer.leftRight("Token #:", formattedSerial);
+      }
       await printer.leftRight("Date:", dateStr);
       await printer.leftRight("Time:", timeStr);
       
@@ -206,10 +212,20 @@ async function printReceipt(ip, port, orderData, userProfile) {
               await printer.println(productLine);
             }
           }
+          const dealInstructions = item.itemInstructions || item.instructions;
+          if (dealInstructions) {
+            await printer.alignLeft();
+            await printer.println(`  * ${dealInstructions}`);
+          }
         } else {
           let itemName = `${item.quantity}x ${item.productName}`;
           if (item.variantName) itemName += ` (${item.variantName})`;
           await printer.leftRight(itemName, `Rs ${item.totalPrice.toFixed(0)}`);
+          const itemInstructions = item.itemInstructions || item.instructions;
+          if (itemInstructions) {
+            await printer.alignLeft();
+            await printer.println(`  * ${itemInstructions}`);
+          }
         }
       }
 

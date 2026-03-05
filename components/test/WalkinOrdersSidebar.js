@@ -362,9 +362,17 @@ export default function WalkinOrdersSidebar({
 
     const formattedOrderNumber = formatOrderNumber(order.order_number)
 
-    // Only show serial for today's orders
-    if (order.daily_serial) {
-      const formattedSerial = dailySerialManager.formatSerial(order.daily_serial)
+    // Check if today's order (local date to match order_date field)
+    const now = new Date()
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const orderDate = order.order_date || (order.created_at ? (() => { const d = new Date(order.created_at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() : null)
+    const isToday = orderDate === todayLocal
+
+    // Get serial: prefer pre-enriched value, fall back to localStorage lookup for today's orders
+    const serial = order.daily_serial || (isToday ? dailySerialManager.getOrCreateSerial(order.order_number) : null)
+
+    if (serial) {
+      const formattedSerial = dailySerialManager.formatSerial(serial)
       return `${formattedSerial} ${formattedOrderNumber}`
     }
 
@@ -597,13 +605,22 @@ export default function WalkinOrdersSidebar({
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center">
-                  <div className={`text-xs ${classes.textSecondary} truncate max-w-[120px]`}>
+                <div className="flex justify-between items-center gap-1">
+                  <div className={`text-xs ${classes.textSecondary} truncate max-w-[80px]`}>
                     {order.customers?.full_name || 'Walk-in Customer'}
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(order.order_status)}`}>
-                    {order.order_status}
-                  </span>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(order.order_status)}`}>
+                      {order.order_status}
+                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                      order.payment_status === 'Paid'
+                        ? isDark ? 'bg-green-900/40 text-green-400' : 'bg-green-100 text-green-700'
+                        : isDark ? 'bg-orange-900/40 text-orange-400' : 'bg-orange-100 text-orange-700'
+                    }`}>
+                      {order.payment_status === 'Paid' ? 'Paid' : 'Unpaid'}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Show table info for walkin orders */}

@@ -29,6 +29,7 @@ import { supabase } from '../../lib/supabase'
 import { authManager } from '../../lib/authManager'
 import { usePermissions } from '../../lib/permissionManager'
 import dailySerialManager from '../../lib/utils/dailySerialManager'
+import { printerManager } from '../../lib/printerManager'
 import InlinePaymentSection from '../pos/InlinePaymentSection'
 import ConvertToDeliveryModal from '../delivery/ConvertToDeliveryModal'
 import ConvertToTakeawayModal from '../delivery/ConvertToTakeawayModal'
@@ -52,6 +53,7 @@ export default function WalkinOrderDetails({
   const [orderHistory, setOrderHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [showPaymentView, setShowPaymentView] = useState(false)
+  const [paymentCompleted, setPaymentCompleted] = useState(false)
   const [showConvertModal, setShowConvertModal] = useState(false)
   const [showConvertToTakeawayModal, setShowConvertToTakeawayModal] = useState(false)
   const [loyaltyRedemption, setLoyaltyRedemption] = useState(null)
@@ -62,6 +64,119 @@ export default function WalkinOrderDetails({
   const router = useRouter()
   const permissions = usePermissions()
   const contentRef = useRef(null)
+
+  const handlePrintReceipt = async () => {
+    try {
+      const user = authManager.getCurrentUser()
+      if (!user?.id) { toast.error('User not logged in'); return }
+      printerManager.setUserId(user.id)
+      const printer = await printerManager.getPrinterForPrinting()
+      if (!printer) { toast.error('No printer configured. Please configure a printer in settings.'); return }
+
+      let items = orderItems
+      if (!items.length && order.id && navigator.onLine) {
+        const { data } = await supabase.from('order_items').select('*').eq('order_id', order.id)
+        items = data || []
+      }
+      if (!items.length) items = order.order_items || order.items || []
+
+      const dailySerial = order.daily_serial || dailySerialManager.getOrCreateSerial(order.order_number) || null
+
+      const orderData = {
+        orderNumber: order.order_number,
+        dailySerial,
+        orderType: order.order_type || orderType,
+        customer: order.customers || { full_name: 'Guest' },
+        deliveryAddress: order.delivery_address || order.customers?.addressline || order.customers?.address,
+        orderInstructions: order.order_instructions,
+        total: order.total_amount,
+        subtotal: order.subtotal || order.total_amount,
+        deliveryCharges: order.delivery_charges || 0,
+        discountAmount: order.discount_amount || 0,
+        loyaltyDiscountAmount: loyaltyRedemption?.discount_applied || 0,
+        loyaltyPointsRedeemed: loyaltyRedemption?.points_used || 0,
+        discountType: 'amount',
+        paymentMethod: order.payment_method || 'Unpaid',
+        paymentTransactions: paymentTransactions.length > 0 ? paymentTransactions : undefined,
+        cart: items.map(item => item.is_deal
+          ? { isDeal: true, dealId: item.deal_id, dealName: item.product_name, dealProducts: (() => { try { return typeof item.deal_products === 'string' ? JSON.parse(item.deal_products) : (item.deal_products || []) } catch(e) { return [] } })(), quantity: item.quantity, totalPrice: item.total_price, itemInstructions: item.item_instructions || null }
+          : { isDeal: false, productName: item.product_name, variantName: item.variant_name, quantity: item.quantity, totalPrice: item.total_price, itemInstructions: item.item_instructions || null }
+        ),
+      }
+
+      const userProfileRaw = JSON.parse(localStorage.getItem('user_profile') || localStorage.getItem('user') || '{}')
+      const cashierName = order.cashier_id ? (order.cashiers?.name || 'Cashier') : (order.users?.customer_name || 'Admin')
+      const userProfile = {
+        store_name: userProfileRaw?.store_name || '',
+        store_address: userProfileRaw?.store_address || '',
+        phone: userProfileRaw?.phone || '',
+        store_logo: localStorage.getItem('store_logo_local') || userProfileRaw?.store_logo || null,
+        qr_code: localStorage.getItem('qr_code_local') || userProfileRaw?.qr_code || null,
+        hashtag1: userProfileRaw?.hashtag1 || '',
+        hashtag2: userProfileRaw?.hashtag2 || '',
+        show_footer_section: userProfileRaw?.show_footer_section !== false,
+        show_logo_on_receipt: userProfileRaw?.show_logo_on_receipt !== false,
+        show_business_name_on_receipt: userProfileRaw?.show_business_name_on_receipt !== false,
+        cashier_name: order.cashier_id ? cashierName : null,
+        customer_name: !order.cashier_id ? cashierName : null,
+      }
+
+      const result = await printerManager.printReceipt(orderData, userProfile, printer)
+      if (!result.success) throw new Error(result.error || 'Print failed')
+    } catch (error) {
+      console.error('Print error:', error)
+      toast.error(`Print failed: ${error.message}`)
+    }
+  }
+
+  const handlePrintToken = async () => {
+    try {
+      const user = authManager.getCurrentUser()
+      if (!user?.id) { toast.error('User not logged in'); return }
+      printerManager.setUserId(user.id)
+      const printer = await printerManager.getPrinterForPrinting()
+      if (!printer) { toast.error('No printer configured. Please configure a printer in settings.'); return }
+
+      let items = orderItems
+      if (!items.length && order.id && navigator.onLine) {
+        const { data } = await supabase.from('order_items').select('*').eq('order_id', order.id)
+        items = data || []
+      }
+      if (!items.length) items = order.order_items || order.items || []
+
+      const mappedItems = items.map(item => item.is_deal
+        ? { isDeal: true, name: item.product_name, quantity: item.quantity, dealProducts: (() => { try { return typeof item.deal_products === 'string' ? JSON.parse(item.deal_products) : (item.deal_products || []) } catch(e) { return [] } })(), instructions: item.item_instructions || '' }
+        : { isDeal: false, name: item.product_name, size: item.variant_name, quantity: item.quantity, instructions: item.item_instructions || '' }
+      )
+
+      const dailySerial = order.daily_serial || dailySerialManager.getOrCreateSerial(order.order_number) || null
+
+      const orderData = {
+        orderNumber: order.order_number,
+        dailySerial,
+        orderType: order.order_type || orderType,
+        customerName: order.customers?.full_name || '',
+        customerPhone: order.customers?.phone || '',
+        specialNotes: order.order_instructions || '',
+        deliveryAddress: order.delivery_address || order.customers?.addressline || order.customers?.address || '',
+        items: mappedItems,
+      }
+
+      const userProfileRaw = JSON.parse(localStorage.getItem('user_profile') || localStorage.getItem('user') || '{}')
+      const cashierName = order.cashier_id ? (order.cashiers?.name || 'Cashier') : (order.users?.customer_name || 'Admin')
+      const userProfile = {
+        store_name: userProfileRaw?.store_name || 'KITCHEN',
+        cashier_name: order.cashier_id ? cashierName : null,
+        customer_name: !order.cashier_id ? cashierName : null,
+      }
+
+      const result = await printerManager.printKitchenToken(orderData, userProfile, printer)
+      if (!result.success) throw new Error(result.error || 'Print failed')
+    } catch (error) {
+      console.error('Kitchen token print error:', error)
+      toast.error(`Print failed: ${error.message}`)
+    }
+  }
 
   // Fast scroll — multiply wheel delta so the content scrolls further per notch
   useEffect(() => {
@@ -79,6 +194,7 @@ export default function WalkinOrderDetails({
   useEffect(() => {
     if (order?.id) {
       fetchOrderDetails()
+      setPaymentCompleted(false)
     }
   }, [order?.id])
 
@@ -351,9 +467,17 @@ export default function WalkinOrderDetails({
   const formatOrderDisplay = (order) => {
     if (!order || !order.order_number) return ''
 
-    // Only show serial for today's orders
-    if (order.daily_serial) {
-      const formattedSerial = dailySerialManager.formatSerial(order.daily_serial)
+    // Check if this is today's order (using local date to match order_date field)
+    const now = new Date()
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const orderDate = order.order_date || (order.created_at ? (() => { const d = new Date(order.created_at); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() : null)
+    const isToday = orderDate === todayLocal
+
+    // Get serial: prefer pre-enriched value, fall back to localStorage lookup for today's orders
+    const serial = order.daily_serial || (isToday ? dailySerialManager.getOrCreateSerial(order.order_number) : null)
+
+    if (serial) {
+      const formattedSerial = dailySerialManager.formatSerial(serial)
       return `${formattedSerial} - ${formatOrderNumber(order.order_number)}`
     }
 
@@ -390,9 +514,12 @@ export default function WalkinOrderDetails({
     return (
       <InlinePaymentSection
         order={order}
-        onPaymentComplete={(paymentData) => {
+        onPaymentComplete={async (paymentData) => {
+          await onPaymentRequired?.(order, paymentData)
+          if (paymentData.completeOrder === false) {
+            setPaymentCompleted(true)
+          }
           setShowPaymentView(false)
-          onPaymentRequired?.(order, paymentData)
         }}
         onCancel={() => setShowPaymentView(false)}
         classes={classes}
@@ -528,6 +655,17 @@ export default function WalkinOrderDetails({
     // 🆕 Save permission flag for quantity decrease control
     localStorage.setItem(`${orderTypePrefix}_can_decrease_qty`, permissions.hasPermission('MODIFY_REOPEN_DECREASE_QTY').toString())
 
+    // Restore table for walkin orders so the table stays selected after reopen
+    if (order.order_type === 'walkin' && order.table_id) {
+      const tableObj = order.tables
+        ? { id: order.table_id, ...order.tables }
+        : { id: order.table_id }
+      localStorage.setItem('walkin_table', JSON.stringify(tableObj))
+    } else if (order.order_type === 'walkin') {
+      // Walkin order with no table — clear stale table selection
+      localStorage.removeItem('walkin_table')
+    }
+
     if (order.order_type === 'delivery') {
       if (order.delivery_charges) {
         localStorage.setItem('delivery_charges', order.delivery_charges.toString())
@@ -541,7 +679,7 @@ export default function WalkinOrderDetails({
     }
 
     if (order.order_type === 'takeaway' && order.takeaway_time) {
-      localStorage.setItem('takeaway_time', order.takeaway_time)
+      localStorage.setItem('takeaway_pickup_time', order.takeaway_time)
     }
 
     const currentCashier = authManager.getCashier()
@@ -645,14 +783,14 @@ export default function WalkinOrderDetails({
           {/* Action Buttons */}
           <div className="flex items-center gap-0.5 flex-nowrap shrink-0 overflow-hidden">
             <button
-              onClick={() => onPrint?.(order, loyaltyRedemption)}
+              onClick={handlePrintReceipt}
               className="flex items-center gap-1 px-1.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
             >
               <Printer className="w-3 h-3" />
               Print
             </button>
             <button
-              onClick={() => onPrintToken?.(order, loyaltyRedemption)}
+              onClick={handlePrintToken}
               className="flex items-center gap-1 px-1.5 py-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white rounded-md transition-colors text-xs font-medium whitespace-nowrap"
             >
               <Printer className="w-3 h-3" />
@@ -717,8 +855,8 @@ export default function WalkinOrderDetails({
             )}
             <button
               onClick={() => {
-                const needsPayment = order.payment_status === 'Pending' && order.payment_method !== 'Account'
-                if (needsPayment) {
+                const effectivelyPaid = paymentCompleted || order.payment_status === 'Paid' || order.payment_method === 'Account'
+                if (!effectivelyPaid) {
                   setShowPaymentView(true)
                 } else {
                   onComplete?.(order)
@@ -884,6 +1022,11 @@ export default function WalkinOrderDetails({
                                   </p>
                                 );
                               })}
+                            </div>
+                          )}
+                          {item.item_instructions && (
+                            <div className={`text-[10px] mt-0.5 px-1 py-0.5 rounded ${isDark ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'}`}>
+                              * {item.item_instructions}
                             </div>
                           )}
                           <div className={`text-[10px] ${classes.textSecondary} ${item.is_deal && dealProducts.length > 0 ? 'mt-0.5' : ''}`}>

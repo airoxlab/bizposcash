@@ -222,11 +222,17 @@ async function generateReceiptESCPOS(orderData, userProfile, assets) {
   commands.push(CMD.ALIGN_CENTER);
 
   const orderNumber = orderData.orderNumber || 'N/A';
+  const formattedSerialReceipt = orderData.dailySerial
+    ? `#${String(orderData.dailySerial).padStart(3, '0')}`
+    : null;
   const orderDate = new Date();
   const dateStr = orderDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   const timeStr = orderDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
   commands.push(leftRight('Invoice:', `#${orderNumber}`));
+  if (formattedSerialReceipt) {
+    commands.push(leftRight('Token #:', formattedSerialReceipt));
+  }
   commands.push(leftRight('Date:', dateStr));
   commands.push(leftRight('Time:', timeStr));
 
@@ -475,6 +481,9 @@ async function generateKitchenTokenESCPOS(orderData, userProfile) {
   commands.push(CMD.ALIGN_CENTER);
   
   const orderNumber = orderData.orderNumber || 'N/A';
+  const formattedSerial = orderData.dailySerial
+    ? `#${String(orderData.dailySerial).padStart(3, '0')}`
+    : null;
   const orderDate = new Date();
   const formattedDate = orderDate.toLocaleDateString('en-GB', {
     day: '2-digit',
@@ -489,8 +498,14 @@ async function generateKitchenTokenESCPOS(orderData, userProfile) {
   const orderType = orderData.orderType ? orderData.orderType.toUpperCase() : 'WALKIN';
 
   commands.push(CMD.BOLD_ON);
-  commands.push(leftRight('Token #', orderNumber));
-  commands.push(CMD.BOLD_OFF);
+  if (formattedSerial) {
+    commands.push(leftRight('Token #', formattedSerial));
+    commands.push(CMD.BOLD_OFF);
+    commands.push(leftRight('Ref:', orderNumber));
+  } else {
+    commands.push(leftRight('Token #', orderNumber));
+    commands.push(CMD.BOLD_OFF);
+  }
   commands.push(leftRight('Date:', formattedDate));
   commands.push(leftRight('Time:', formattedTime));
   commands.push(leftRight('Type:', orderType));
@@ -601,6 +616,15 @@ async function generateKitchenTokenESCPOS(orderData, userProfile) {
     commands.push(CMD.BOLD_OFF);
     commands.push(CMD.ALIGN_CENTER);
     commands.push(drawLine('-'));
+    const deliveryAddr = orderData.deliveryAddress || orderData.customerAddress;
+    if (deliveryAddr) {
+      commands.push(CMD.ALIGN_LEFT);
+      commands.push(CMD.BOLD_ON);
+      commands.push(leftText('Address:'));
+      commands.push(CMD.BOLD_OFF);
+      commands.push(wrapText(deliveryAddr, 2));
+      commands.push(drawLine('-'));
+    }
   } else if (orderData.orderType === 'takeaway') {
     commands.push(CMD.ALIGN_CENTER);
     commands.push(CMD.BOLD_ON);

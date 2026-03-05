@@ -122,7 +122,7 @@ export default function RidersOrdersPage() {
         `)
         .eq("user_id", userData.id)
         .eq("order_type", "delivery")
-        .in("order_status", ["Pending", "Preparing", "Ready"])
+        .in("order_status", ["Pending", "Preparing", "Ready", "Dispatched"])
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -136,6 +136,9 @@ export default function RidersOrdersPage() {
         const updatedOrder = ordersWithSerials.find(o => o.id === selectedOrder.id);
         if (updatedOrder) {
           setSelectedOrder(updatedOrder);
+        } else {
+          // Order no longer in riders list (completed) — clear selection
+          setSelectedOrder(null);
         }
       }
 
@@ -226,6 +229,23 @@ export default function RidersOrdersPage() {
         return;
       }
 
+      // Verify order is still in an assignable state (guard against race condition)
+      const { data: currentOrder, error: statusError } = await supabase
+        .from("orders")
+        .select("order_status")
+        .eq("id", selectedOrder.id)
+        .single();
+
+      if (statusError) throw statusError;
+
+      if (!["Pending", "Preparing", "Ready", "Dispatched"].includes(currentOrder?.order_status)) {
+        notify.error("This order is no longer active and cannot be assigned a rider");
+        setShowAssignModal(false);
+        setSelectedOrder(null);
+        await fetchDeliveryOrders();
+        return;
+      }
+
       const { error } = await supabase
         .from("orders")
         .update({
@@ -276,6 +296,7 @@ export default function RidersOrdersPage() {
 
       const orderData = {
         orderNumber: selectedOrder.order_number,
+        dailySerial: selectedOrder.daily_serial || null,
         orderType: selectedOrder.order_type,
         customer: selectedOrder.customers,
         deliveryAddress: selectedOrder.delivery_address || selectedOrder.customers?.addressline,
@@ -404,10 +425,14 @@ export default function RidersOrdersPage() {
         return isDark
           ? "bg-purple-900/30 text-purple-400 border-purple-700"
           : "bg-purple-100 text-purple-700 border-purple-300";
-      case "Completed":
+      case "Dispatched":
         return isDark
           ? "bg-green-900/30 text-green-400 border-green-700"
           : "bg-green-100 text-green-700 border-green-300";
+      case "Completed":
+        return isDark
+          ? "bg-gray-700 text-gray-400 border-gray-600"
+          : "bg-gray-100 text-gray-600 border-gray-300";
       default:
         return isDark
           ? "bg-gray-700 text-gray-300"

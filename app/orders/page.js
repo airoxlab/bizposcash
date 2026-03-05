@@ -1481,6 +1481,7 @@ export default function OrdersPage() {
 
       const orderData = {
         orderNumber: selectedOrder.order_number,
+        dailySerial: selectedOrder.daily_serial || null,
         orderType: selectedOrder.order_type,
         customer: selectedOrder.customers,
         deliveryAddress: selectedOrder.delivery_address || selectedOrder.customers?.addressline || selectedOrder.customers?.address,
@@ -1526,6 +1527,7 @@ export default function OrdersPage() {
               quantity: item.quantity,
               totalPrice: item.total_price,
               finalPrice: item.final_price,
+              itemInstructions: item.item_instructions || null,
             };
           }
           // Handle regular product items
@@ -1536,6 +1538,7 @@ export default function OrdersPage() {
             quantity: item.quantity,
             totalPrice: item.total_price,
             finalPrice: item.final_price,
+            itemInstructions: item.item_instructions || null,
           };
         }),
         paymentMethod: selectedOrder.payment_method || "Cash",
@@ -1701,6 +1704,7 @@ export default function OrdersPage() {
 
       const orderData = {
         orderNumber: selectedOrder.order_number,
+        dailySerial: selectedOrder.daily_serial || null,
         orderType: selectedOrder.order_type,
         customerName: selectedOrder.customers?.name || "",
         customerPhone: selectedOrder.customers?.phone || "",
@@ -1709,6 +1713,7 @@ export default function OrdersPage() {
         deliveryCharges: selectedOrder.delivery_charges || 0,
         discountAmount: selectedOrder.discount_amount || 0,
         specialNotes: selectedOrder.order_instructions || "",
+        deliveryAddress: selectedOrder.delivery_address || selectedOrder.customers?.addressline || selectedOrder.customers?.address || "",
         items: mappedItems,
       };
 

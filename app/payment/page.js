@@ -256,7 +256,7 @@ useEffect(() => {
     if (orderData) {
       // Calculate total with both smart discount and loyalty redemption
       const totalDiscount = newDiscountAmount + loyaltyDiscountAmount
-      const deliveryCharges = orderData.deliveryCharges || 0
+      const deliveryCharges = parseFloat(orderData.deliveryCharges) || 0
       const newTotal = Math.max(0, originalSubtotal - totalDiscount + deliveryCharges)
 
       // 🆕 Recalculate amount due for modified PAID orders
@@ -497,6 +497,9 @@ const processOrder = async () => {
       takeawayTimeForDB = orderData.takeawayTime // Already in "HH:MM:SS" or "HH:MM" format
     }
 
+    // Declare newDailySerial here so it's accessible after the if/else block
+    let newDailySerial = null
+
     // CHECK IF WE'RE MODIFYING AN EXISTING ORDER (only if online)
     if (orderData.isModifying && orderData.existingOrderId && navigator.onLine) {
       console.log('🔄 Modifying existing order (ONLINE):', orderData.existingOrderId)
@@ -549,8 +552,9 @@ const processOrder = async () => {
         if (itemError) throw itemError
       }
 
-      // CRITICAL FIX: Update customer ledger entry if payment method is Account or Unpaid with a customer
-      if ((selectedPaymentMethod?.id === 'account' || selectedPaymentMethod?.id === 'unpaid') && orderData.customer?.id) {
+      // Update customer ledger entry if payment method is Account with a customer
+      // NOTE: "Unpaid" means pay-later in cash - do NOT add to customer ledger
+      if (selectedPaymentMethod?.id === 'account' && orderData.customer?.id) {
         try {
           console.log('💳 [Payment] Updating customer ledger for modified order')
 
@@ -644,7 +648,7 @@ const processOrder = async () => {
     } else {
       // CREATE NEW ORDER or MODIFY OFFLINE (use cacheManager which handles both)
       // CREATE NEW ORDER (or update existing if modifying offline) - WITH delivery_charges and delivery_time
-      const { order, orderNumber: newOrderNumber } = await cacheManager.createOrder({
+      const { order, orderNumber: newOrderNumber, dailySerial: _newDailySerial } = await cacheManager.createOrder({
         user_id: currentUser.id,
         cashier_id: cashier?.id || orderData.cashierId || null,
         session_id: currentSession?.id || orderData.sessionId || null,
@@ -676,6 +680,7 @@ const processOrder = async () => {
         existingOrderNumber: orderData.existingOrderNumber || null,
         detailedChanges: orderData.detailedChanges || null // Pass detailed changes for history tracking
       })
+      newDailySerial = _newDailySerial
 
       setOrderNumber(newOrderNumber)
       setIsOfflineOrder(order._isOffline)
@@ -764,10 +769,11 @@ const processOrder = async () => {
         }
       }
 
-      // NOTE: Customer Account/Unpaid ledger entry is created automatically in cacheManager.syncOrder()
+      // NOTE: Customer Account ledger entry is created automatically in cacheManager.syncOrder()
       // No need to create it here to avoid duplicates
-      if ((selectedPaymentMethod?.id === 'account' || selectedPaymentMethod?.id === 'unpaid') && orderData.customer?.id) {
-        console.log(`💳 [Payment] ${selectedPaymentMethod.name} payment with customer - ledger entry will be created during order sync`)
+      // "Unpaid" orders do NOT touch the customer ledger
+      if (selectedPaymentMethod?.id === 'account' && orderData.customer?.id) {
+        console.log(`💳 [Payment] Account payment with customer - ledger entry will be created during order sync`)
       }
     }
 
@@ -775,6 +781,7 @@ const processOrder = async () => {
     localStorage.setItem('final_order_data', JSON.stringify({
       ...orderData,
       orderNumber: orderData.isModifying ? orderData.existingOrderNumber : orderNumber,
+      dailySerial: newDailySerial || orderData.dailySerial || null,
       paymentMethod: selectedPaymentMethod.name,
       cashReceived: selectedPaymentMethod.requiresAmount ? parseFloat(cashAmount) : null,
       changeAmount: selectedPaymentMethod.requiresAmount ? changeAmount : 0,
@@ -798,6 +805,10 @@ const processOrder = async () => {
     localStorage.removeItem('walkin_modifying_order_number')
     localStorage.removeItem('walkin_original_state')
     localStorage.removeItem('walkin_original_order_status')
+    localStorage.removeItem('walkin_original_payment_status')
+    localStorage.removeItem('walkin_original_amount_paid')
+    localStorage.removeItem('walkin_original_payment_method')
+    localStorage.removeItem('walkin_can_decrease_qty')
     localStorage.removeItem('walkin_table')
     localStorage.removeItem('delivery_cart')
     localStorage.removeItem('delivery_customer')
@@ -809,13 +820,38 @@ const processOrder = async () => {
     localStorage.removeItem('delivery_modifying_order')
     localStorage.removeItem('delivery_modifying_order_number')
     localStorage.removeItem('delivery_original_state')
+    localStorage.removeItem('delivery_order_data')
+    localStorage.removeItem('delivery_discount')
+    localStorage.removeItem('delivery_original_order_status')
+    localStorage.removeItem('delivery_original_payment_status')
+    localStorage.removeItem('delivery_original_amount_paid')
+    localStorage.removeItem('delivery_original_payment_method')
+    localStorage.removeItem('delivery_can_decrease_qty')
     localStorage.removeItem('takeaway_cart')
     localStorage.removeItem('takeaway_customer')
     localStorage.removeItem('takeaway_instructions')
-    localStorage.removeItem('takeaway_time')
+    localStorage.removeItem('takeaway_pickup_time')
     localStorage.removeItem('takeaway_modifying_order')
     localStorage.removeItem('takeaway_modifying_order_number')
     localStorage.removeItem('takeaway_original_state')
+    localStorage.removeItem('takeaway_discount')
+    localStorage.removeItem('takeaway_original_order_status')
+    localStorage.removeItem('takeaway_original_payment_status')
+    localStorage.removeItem('takeaway_original_amount_paid')
+    localStorage.removeItem('takeaway_original_payment_method')
+    localStorage.removeItem('takeaway_can_decrease_qty')
+
+    // Clear new-order page cart for whichever tab was used
+    const sourceKey = orderData?.sourceStorageKey
+    if (sourceKey) {
+      localStorage.removeItem(`${sourceKey}_cart`)
+      localStorage.removeItem(`${sourceKey}_customer`)
+      localStorage.removeItem(`${sourceKey}_instructions`)
+      localStorage.removeItem(`${sourceKey}_extras`)
+      if (sourceKey === 'new_order_walkin') {
+        localStorage.removeItem('new_order_walkin_table')
+      }
+    }
 
     setOrderComplete(true)
 
@@ -997,6 +1033,7 @@ const handleThermalPrint = async () => {
     const completeOrderData = {
       ...orderData,
       orderNumber,
+      dailySerial: finalOrderData?.dailySerial || orderData?.dailySerial || null,
       paymentMethod: finalOrderData?.paymentMethod || selectedPaymentMethod?.name || 'Cash',
       cashReceived: selectedPaymentMethod?.requiresAmount ? parseFloat(cashAmount) : null,
       changeAmount: selectedPaymentMethod?.requiresAmount ? changeAmount : 0,
@@ -1087,6 +1124,10 @@ const handlePrintKitchenToken = async () => {
     // Get user profile data
     const userProfileData = getUserProfileData()
 
+    // Get final order data (contains dailySerial assigned after order creation)
+    const finalOrderDataStr = localStorage.getItem('final_order_data')
+    const finalOrderData = finalOrderDataStr ? JSON.parse(finalOrderDataStr) : null
+
     // Map cart items
     let mappedItems = orderData.cart?.map(item => ({
       name: item.isDeal ? item.dealName : (item.productName || item.name),
@@ -1162,10 +1203,12 @@ const handlePrintKitchenToken = async () => {
     // Prepare kitchen token data
     const kitchenTokenData = {
       orderNumber,
+      dailySerial: finalOrderData?.dailySerial || orderData?.dailySerial || null,
       orderType: orderData.orderType,
       customerName: orderData.customerName || '',
       customerPhone: orderData.customerPhone || '',
       specialNotes: orderData.orderInstructions || '',
+      deliveryAddress: orderData.deliveryAddress || '',
       items: mappedItems
     }
 
@@ -1269,7 +1312,7 @@ const handlePrintKitchenToken = async () => {
       const paymentStatus = Math.abs(totalPaidAmount - orderData.total) < 0.01 ? 'Paid' : 'Partial'
 
       // Create order with split payment info (or update existing if modifying offline)
-      const { order, orderNumber: newOrderNumber } = await cacheManager.createOrder({
+      const { order, orderNumber: newOrderNumber, dailySerial: newDailySerial } = await cacheManager.createOrder({
         user_id: currentUser.id,
         cashier_id: cashier?.id || orderData.cashierId || null,
         session_id: currentSession?.id || orderData.sessionId || null,
@@ -1387,6 +1430,7 @@ const handlePrintKitchenToken = async () => {
       localStorage.setItem('final_order_data', JSON.stringify({
         ...orderData,
         orderNumber: newOrderNumber,
+        dailySerial: newDailySerial || orderData.dailySerial || null,
         paymentMethod: 'Split',
         cashReceived: null,
         changeAmount: 0,
@@ -1407,16 +1451,45 @@ const handlePrintKitchenToken = async () => {
       localStorage.removeItem('walkin_cart')
       localStorage.removeItem('walkin_customer')
       localStorage.removeItem('walkin_instructions')
+      localStorage.removeItem('walkin_original_payment_status')
+      localStorage.removeItem('walkin_original_amount_paid')
+      localStorage.removeItem('walkin_original_payment_method')
+      localStorage.removeItem('walkin_can_decrease_qty')
       localStorage.removeItem('walkin_table')
       localStorage.removeItem('delivery_cart')
       localStorage.removeItem('delivery_customer')
       localStorage.removeItem('delivery_instructions')
       localStorage.removeItem('delivery_time')
       localStorage.removeItem('delivery_charges')
+      localStorage.removeItem('delivery_order_data')
+      localStorage.removeItem('delivery_discount')
+      localStorage.removeItem('delivery_original_order_status')
+      localStorage.removeItem('delivery_original_payment_status')
+      localStorage.removeItem('delivery_original_amount_paid')
+      localStorage.removeItem('delivery_original_payment_method')
+      localStorage.removeItem('delivery_can_decrease_qty')
       localStorage.removeItem('takeaway_cart')
       localStorage.removeItem('takeaway_customer')
       localStorage.removeItem('takeaway_instructions')
-      localStorage.removeItem('takeaway_time')
+      localStorage.removeItem('takeaway_pickup_time')
+      localStorage.removeItem('takeaway_discount')
+      localStorage.removeItem('takeaway_original_order_status')
+      localStorage.removeItem('takeaway_original_payment_status')
+      localStorage.removeItem('takeaway_original_amount_paid')
+      localStorage.removeItem('takeaway_original_payment_method')
+      localStorage.removeItem('takeaway_can_decrease_qty')
+
+      // Clear new-order page cart for whichever tab was used
+      const sourceKeySplit = orderData?.sourceStorageKey
+      if (sourceKeySplit) {
+        localStorage.removeItem(`${sourceKeySplit}_cart`)
+        localStorage.removeItem(`${sourceKeySplit}_customer`)
+        localStorage.removeItem(`${sourceKeySplit}_instructions`)
+        localStorage.removeItem(`${sourceKeySplit}_extras`)
+        if (sourceKeySplit === 'new_order_walkin') {
+          localStorage.removeItem('new_order_walkin_table')
+        }
+      }
 
       // Close modal and show order complete
       setShowSplitPaymentModal(false)
@@ -1553,10 +1626,10 @@ if (orderComplete) {
                   <span className={`font-semibold ${classes.textPrimary}`}>{orderData.deliveryTime}</span>
                 </div>
               )}
-              {orderData.deliveryCharges > 0 && (
+              {parseFloat(orderData.deliveryCharges) > 0 && (
                 <div className="flex justify-between">
                   <span className={classes.textSecondary}>Delivery Charges:</span>
-                  <span className={`font-semibold ${classes.textPrimary}`}>Rs {orderData.deliveryCharges.toFixed(2)}</span>
+                  <span className={`font-semibold ${classes.textPrimary}`}>Rs {parseFloat(orderData.deliveryCharges).toFixed(2)}</span>
                 </div>
               )}
               {orderData.deliveryAddress && (
@@ -2185,10 +2258,10 @@ if (orderComplete) {
                   <span className="font-semibold">-Rs {loyaltyDiscountAmount.toFixed(0)}</span>
                 </div>
               )}
-              {orderData.deliveryCharges > 0 && (
+              {parseFloat(orderData.deliveryCharges) > 0 && (
                 <div className={`flex justify-between text-xs ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
                   <span>Delivery:</span>
-                  <span className="font-semibold">+Rs {orderData.deliveryCharges.toFixed(0)}</span>
+                  <span className="font-semibold">+Rs {parseFloat(orderData.deliveryCharges).toFixed(0)}</span>
                 </div>
               )}
               <div className={`flex justify-between text-base font-bold ${classes.textPrimary} ${classes.border} border-t pt-1.5 mt-1.5`}>

@@ -562,9 +562,23 @@ export default function CartSidebar({
       {cart.length > 0 && (
         <div className={`p-2 ${classes.border} border-t ${classes.card}`}>
           {/* Price Summary */}
-          <div className={`flex justify-between items-center mb-2 p-2 ${isDark ? 'bg-gray-900/50' : 'bg-gray-50'} rounded-lg`}>
-            <span className={`text-sm font-bold ${classes.textPrimary}`}>Total:</span>
-            <span className={`text-base font-bold ${isDark ? 'text-green-400' : 'text-green-600'}`}>Rs {calculateTotal().toFixed(2)}</span>
+          <div className={`mb-2 p-2 ${isDark ? 'bg-gray-900/50' : 'bg-gray-50'} rounded-lg`}>
+            {orderType === 'delivery' && (parseFloat(calculateTotal()) - parseFloat(calculateSubtotal())) > 0 && (
+              <>
+                <div className="flex justify-between items-center mb-1">
+                  <span className={`text-xs ${classes.textSecondary}`}>Subtotal:</span>
+                  <span className={`text-xs ${classes.textSecondary}`}>Rs {parseFloat(calculateSubtotal()).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className={`text-xs font-medium ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Delivery Fee:</span>
+                  <span className={`text-xs font-medium ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>+Rs {(parseFloat(calculateTotal()) - parseFloat(calculateSubtotal())).toFixed(2)}</span>
+                </div>
+              </>
+            )}
+            <div className="flex justify-between items-center">
+              <span className={`text-sm font-bold ${classes.textPrimary}`}>Total:</span>
+              <span className={`text-base font-bold ${isDark ? 'text-green-400' : 'text-green-600'}`}>Rs {parseFloat(calculateTotal()).toFixed(2)}</span>
+            </div>
           </div>
 
           {/* Offline Warning */}
@@ -588,7 +602,7 @@ export default function CartSidebar({
           >
             <div className="flex items-center justify-center text-sm">
               <ShoppingCart className="w-4 h-4 mr-1.5" />
-              Order & Pay Rs {calculateTotal().toFixed(2)}
+              Order & Pay Rs {parseFloat(calculateTotal()).toFixed(2)}
             </div>
           </motion.button>
         </div>

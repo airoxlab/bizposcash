@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { cacheManager } from '../../lib/cacheManager'
 import { themeManager } from '../../lib/themeManager'
 import { authManager } from '../../lib/authManager'
+import { printerManager } from '../../lib/printerManager'
+import { supabase } from '../../lib/supabase'
 import { notify } from '../../components/ui/NotificationSystem'
 import Modal from '../../components/ui/Modal'
 import ProductGrid from '../../components/test/ProductGrid'
@@ -16,6 +18,7 @@ import WalkinOrderDetails from '../../components/test/WalkinOrderDetails'
 import TableSelectionPanel from '../../components/test/TableSelectionPanel'
 import { Users, ShoppingBag, Truck, FileText } from 'lucide-react'
 import toast, { Toaster } from 'react-hot-toast'
+import SplitPaymentModal from '../../components/pos/SplitPaymentModal'
 
 const ORDER_TABS = [
   {
@@ -47,6 +50,7 @@ const ORDER_TABS = [
 export default function NewOrderPage() {
   const router = useRouter()
   const productGridRef = useRef(null)
+  const isInitialized = useRef(false)
 
   const [user, setUser] = useState(null)
   const [cashierData, setCashierData] = useState(null)
@@ -83,6 +87,8 @@ export default function NewOrderPage() {
   // Active orders sidebar
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [ordersRefreshTrigger, setOrdersRefreshTrigger] = useState(0)
+  const [showSplitPaymentModal, setShowSplitPaymentModal] = useState(false)
+  const [splitPaymentOrder, setSplitPaymentOrder] = useState(null)
 
   // Table selection (walkin only)
   const [selectedTable, setSelectedTable] = useState(null)
@@ -91,15 +97,64 @@ export default function NewOrderPage() {
   const customer = customers[activeOrderType] || null
   const orderInstructions = instructions[activeOrderType] || ''
 
-  // Persist carts to localStorage
+  // Persist carts to localStorage (also clear when empty to avoid stale data on reload)
+  // Guard with isInitialized to avoid wiping localStorage before the mount restore runs
   useEffect(() => {
+    if (!isInitialized.current) return
     ORDER_TABS.forEach(tab => {
       const c = carts[tab.id]
       if (c && c.length > 0) {
         localStorage.setItem(`${tab.storageKey}_cart`, JSON.stringify(c))
+      } else {
+        localStorage.removeItem(`${tab.storageKey}_cart`)
       }
     })
   }, [carts])
+
+  useEffect(() => {
+    if (!isInitialized.current) return
+    ORDER_TABS.forEach(tab => {
+      const instr = instructions[tab.id]
+      if (instr) {
+        localStorage.setItem(`${tab.storageKey}_instructions`, instr)
+      } else {
+        localStorage.removeItem(`${tab.storageKey}_instructions`)
+      }
+    })
+  }, [instructions])
+
+  useEffect(() => {
+    if (!isInitialized.current) return
+    ORDER_TABS.forEach(tab => {
+      const c = customers[tab.id]
+      if (c) {
+        localStorage.setItem(`${tab.storageKey}_customer`, JSON.stringify(c))
+      } else {
+        localStorage.removeItem(`${tab.storageKey}_customer`)
+      }
+    })
+  }, [customers])
+
+  useEffect(() => {
+    if (!isInitialized.current) return
+    ORDER_TABS.forEach(tab => {
+      const e = orderExtras[tab.id]
+      if (e && Object.keys(e).length > 0) {
+        localStorage.setItem(`${tab.storageKey}_extras`, JSON.stringify(e))
+      } else {
+        localStorage.removeItem(`${tab.storageKey}_extras`)
+      }
+    })
+  }, [orderExtras])
+
+  useEffect(() => {
+    if (!isInitialized.current) return
+    if (selectedTable) {
+      localStorage.setItem('new_order_walkin_table', JSON.stringify(selectedTable))
+    } else {
+      localStorage.removeItem('new_order_walkin_table')
+    }
+  }, [selectedTable])
 
   useEffect(() => {
     localStorage.setItem('new_order_active_type', activeOrderType)
@@ -125,21 +180,31 @@ export default function NewOrderPage() {
     setTheme(themeManager.currentTheme)
     themeManager.applyTheme()
 
-    // Restore carts from localStorage
+    // Restore carts, customers, instructions, extras, and table from localStorage
     const restoredCarts = { walkin: [], takeaway: [], delivery: [] }
     const restoredCustomers = { walkin: null, takeaway: null, delivery: null }
     const restoredInstructions = { walkin: '', takeaway: '', delivery: '' }
+    const restoredExtras = { walkin: {}, takeaway: {}, delivery: {} }
 
     ORDER_TABS.forEach(tab => {
       const savedCart = localStorage.getItem(`${tab.storageKey}_cart`)
       const savedInstr = localStorage.getItem(`${tab.storageKey}_instructions`)
+      const savedCustomer = localStorage.getItem(`${tab.storageKey}_customer`)
+      const savedExtras = localStorage.getItem(`${tab.storageKey}_extras`)
       if (savedCart) try { restoredCarts[tab.id] = JSON.parse(savedCart) } catch {}
       if (savedInstr) restoredInstructions[tab.id] = savedInstr
+      if (savedCustomer) try { restoredCustomers[tab.id] = JSON.parse(savedCustomer) } catch {}
+      if (savedExtras) try { restoredExtras[tab.id] = JSON.parse(savedExtras) } catch {}
     })
+
+    const savedTable = localStorage.getItem('new_order_walkin_table')
+    if (savedTable) try { setSelectedTable(JSON.parse(savedTable)) } catch {}
 
     setCarts(restoredCarts)
     setCustomers(restoredCustomers)
     setInstructions(restoredInstructions)
+    setOrderExtras(restoredExtras)
+    isInitialized.current = true
 
     checkAndLoadData()
 
@@ -333,8 +398,14 @@ export default function NewOrderPage() {
       localStorage.removeItem(`${tab.storageKey}_cart`)
       localStorage.removeItem(`${tab.storageKey}_customer`)
       localStorage.removeItem(`${tab.storageKey}_instructions`)
+      localStorage.removeItem(`${tab.storageKey}_extras`)
     })
+    localStorage.removeItem('new_order_walkin_table')
     setCarts({ walkin: [], takeaway: [], delivery: [] })
+    setCustomers({ walkin: null, takeaway: null, delivery: null })
+    setInstructions({ walkin: '', takeaway: '', delivery: '' })
+    setOrderExtras({ walkin: {}, takeaway: {}, delivery: {} })
+    setSelectedTable(null)
     notify.info('Order discarded')
     router.push('/dashboard/')
   }
@@ -344,6 +415,7 @@ export default function NewOrderPage() {
       notify.warning('Please add items to cart before proceeding')
       return
     }
+    const tab = ORDER_TABS.find(t => t.id === activeOrderType)
     const extras = orderExtras[activeOrderType] || {}
     const orderData = {
       cart,
@@ -355,19 +427,14 @@ export default function NewOrderPage() {
       cashierId: cashierData?.id || null,
       userId: user?.id,
       sessionId,
+      tableId: activeOrderType === 'walkin' ? (selectedTable?.id || null) : null,
+      tableName: activeOrderType === 'walkin' ? (selectedTable?.table_name || selectedTable?.table_number || null) : null,
+      sourceStorageKey: tab?.storageKey || null,
       ...extras
     }
     localStorage.setItem('order_data', JSON.stringify(orderData))
-
-    // Clear this order type's cart so returning to the page starts fresh
-    const tab = ORDER_TABS.find(t => t.id === activeOrderType)
-    if (tab) {
-      localStorage.removeItem(`${tab.storageKey}_cart`)
-      localStorage.removeItem(`${tab.storageKey}_instructions`)
-    }
-    setCarts(prev => ({ ...prev, [activeOrderType]: [] }))
-    setInstructions(prev => ({ ...prev, [activeOrderType]: '' }))
-
+    // Do NOT clear cart here — payment page clears it on success.
+    // If user comes back from payment, cart is preserved.
     notify.info('Proceeding to payment...')
     router.push('/payment')
   }
@@ -403,6 +470,288 @@ export default function NewOrderPage() {
       })}
     </div>
   )
+
+  const handlePrintOrder = async (order) => {
+    try {
+      if (!user?.id) { toast.error('User not logged in'); return }
+      printerManager.setUserId(user.id)
+      const printer = await printerManager.getPrinterForPrinting()
+      if (!printer) { toast.error('No printer configured. Please configure a printer in settings.'); return }
+
+      let orderItems = []
+      if (order.id && navigator.onLine) {
+        const { data } = await supabase.from('order_items').select('*').eq('order_id', order.id)
+        orderItems = data || []
+      }
+      if (!orderItems.length) orderItems = order.order_items || order.items || []
+
+      const orderData = {
+        orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
+        orderType: order.order_type || 'walkin',
+        customer: order.customers || { full_name: 'Guest' },
+        deliveryAddress: order.delivery_address || order.customers?.addressline || order.customers?.address,
+        orderInstructions: order.order_instructions,
+        total: order.total_amount,
+        subtotal: order.subtotal || order.total_amount,
+        deliveryCharges: order.delivery_charges || 0,
+        discountAmount: order.discount_amount || 0,
+        loyaltyDiscountAmount: 0,
+        loyaltyPointsRedeemed: 0,
+        discountType: 'amount',
+        cart: orderItems.map(item => item.is_deal
+          ? { isDeal: true, dealId: item.deal_id, dealName: item.product_name, dealProducts: (() => { try { return typeof item.deal_products === 'string' ? JSON.parse(item.deal_products) : (item.deal_products || []) } catch(e) { return [] } })(), quantity: item.quantity, totalPrice: item.total_price, itemInstructions: item.item_instructions || null }
+          : { isDeal: false, productName: item.product_name, variantName: item.variant_name, quantity: item.quantity, totalPrice: item.total_price, itemInstructions: item.item_instructions || null }
+        ),
+        paymentMethod: order.payment_method || 'Unpaid',
+      }
+
+      const userProfileRaw = JSON.parse(localStorage.getItem('user_profile') || localStorage.getItem('user') || '{}')
+      const cashierName = order.cashier_id ? (order.cashiers?.name || 'Cashier') : (order.users?.customer_name || 'Admin')
+      const userProfile = {
+        store_name: userProfileRaw?.store_name || '',
+        store_address: userProfileRaw?.store_address || '',
+        phone: userProfileRaw?.phone || '',
+        store_logo: localStorage.getItem('store_logo_local') || userProfileRaw?.store_logo || null,
+        qr_code: localStorage.getItem('qr_code_local') || userProfileRaw?.qr_code || null,
+        hashtag1: userProfileRaw?.hashtag1 || '',
+        hashtag2: userProfileRaw?.hashtag2 || '',
+        show_footer_section: userProfileRaw?.show_footer_section !== false,
+        show_logo_on_receipt: userProfileRaw?.show_logo_on_receipt !== false,
+        show_business_name_on_receipt: userProfileRaw?.show_business_name_on_receipt !== false,
+        cashier_name: order.cashier_id ? cashierName : null,
+        customer_name: !order.cashier_id ? cashierName : null,
+      }
+
+      const result = await printerManager.printReceipt(orderData, userProfile, printer)
+      if (!result.success) throw new Error(result.error || 'Print failed')
+    } catch (error) {
+      console.error('Print error:', error)
+      toast.error(`Print failed: ${error.message}`)
+    }
+  }
+
+  const handlePrintToken = async (order) => {
+    try {
+      if (!user?.id) { toast.error('User not logged in'); return }
+      printerManager.setUserId(user.id)
+      const printer = await printerManager.getPrinterForPrinting()
+      if (!printer) { toast.error('No printer configured. Please configure a printer in settings.'); return }
+
+      let orderItems = []
+      if (order.id && navigator.onLine) {
+        const { data } = await supabase.from('order_items').select('*').eq('order_id', order.id)
+        orderItems = data || []
+      }
+      if (!orderItems.length) orderItems = order.order_items || order.items || []
+
+      const mappedItems = orderItems.map(item => item.is_deal
+        ? { isDeal: true, name: item.product_name, quantity: item.quantity, dealProducts: (() => { try { return typeof item.deal_products === 'string' ? JSON.parse(item.deal_products) : (item.deal_products || []) } catch(e) { return [] } })(), instructions: item.item_instructions || '' }
+        : { isDeal: false, name: item.product_name, size: item.variant_name, quantity: item.quantity, instructions: item.item_instructions || '' }
+      )
+
+      const orderData = {
+        orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
+        orderType: order.order_type || 'walkin',
+        customerName: order.customers?.full_name || '',
+        customerPhone: order.customers?.phone || '',
+        specialNotes: order.order_instructions || '',
+        deliveryAddress: order.delivery_address || order.customers?.addressline || order.customers?.address || '',
+        items: mappedItems,
+      }
+
+      const userProfileRaw = JSON.parse(localStorage.getItem('user_profile') || localStorage.getItem('user') || '{}')
+      const cashierName = order.cashier_id ? (order.cashiers?.name || 'Cashier') : (order.users?.customer_name || 'Admin')
+      const userProfile = {
+        store_name: userProfileRaw?.store_name || 'KITCHEN',
+        cashier_name: order.cashier_id ? cashierName : null,
+        customer_name: !order.cashier_id ? cashierName : null,
+      }
+
+      const result = await printerManager.printKitchenToken(orderData, userProfile, printer)
+      if (!result.success) throw new Error(result.error || 'Print failed')
+    } catch (error) {
+      console.error('Kitchen token print error:', error)
+      toast.error(`Print failed: ${error.message}`)
+    }
+  }
+
+  const handleOrderStatusUpdate = async (order, newStatus) => {
+    try {
+      const result = await cacheManager.updateOrderStatus(order.id, newStatus)
+      if (!result.success) throw new Error(result.message || 'Failed to update order status')
+      if (newStatus === 'Completed') {
+        setSelectedOrder(null)
+        setCurrentView('products')
+        setOrdersRefreshTrigger(prev => prev + 1)
+      } else {
+        setOrdersRefreshTrigger(prev => prev + 1)
+      }
+    } catch (error) {
+      console.error('Error updating order status:', error)
+      toast.error('Failed to update order status')
+    }
+  }
+
+  const handlePaymentRequired = async (order, paymentData) => {
+    try {
+      // Split payment: open modal
+      if (paymentData?.useSplitPayment) {
+        setSplitPaymentOrder(order)
+        setShowSplitPaymentModal(true)
+        return
+      }
+
+      // Split payment results (array of {method, amount})
+      if (Array.isArray(paymentData)) {
+        const totalPaid = paymentData.reduce((sum, p) => sum + parseFloat(p.amount), 0)
+        const transactions = paymentData.map(payment => ({
+          order_id: order.id,
+          payment_method: payment.method,
+          amount: parseFloat(payment.amount),
+          reference_number: payment.reference || null,
+          notes: payment.notes || null,
+          created_at: new Date().toISOString()
+        }))
+
+        if (navigator.onLine) {
+          const { error: updateError } = await supabase
+            .from('orders')
+            .update({ payment_method: 'Split', payment_status: 'Paid', amount_paid: totalPaid, updated_at: new Date().toISOString() })
+            .eq('id', order.id)
+          if (updateError) throw updateError
+
+          const { error: txError } = await supabase.from('order_payment_transactions').insert(transactions)
+          if (txError) throw txError
+          cacheManager.setPaymentTransactions?.(order.id, transactions)
+        } else {
+          const orderIndex = cacheManager.cache.orders.findIndex(o => o.id === order.id)
+          if (orderIndex !== -1) {
+            cacheManager.cache.orders[orderIndex] = {
+              ...cacheManager.cache.orders[orderIndex],
+              payment_method: 'Split',
+              payment_status: 'Paid',
+              amount_paid: totalPaid,
+              updated_at: new Date().toISOString(),
+              _isSynced: false
+            }
+            await cacheManager.saveCacheToStorage()
+          }
+          cacheManager.setPaymentTransactions?.(order.id, transactions)
+        }
+
+        toast.success(`Order #${order.order_number} paid and completed!`)
+        await handleOrderStatusUpdate(order, 'Completed')
+        setOrdersRefreshTrigger(prev => prev + 1)
+        return
+      }
+
+      // Regular payment
+      if (navigator.onLine) {
+        const { error } = await supabase
+          .from('orders')
+          .update({
+            payment_method: paymentData.paymentMethod,
+            payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
+            discount_amount: paymentData.discountAmount || 0,
+            discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
+            total_amount: paymentData.newTotal,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', order.id)
+        if (error) throw error
+
+        // Account payment: create customer ledger entry
+        if (paymentData.paymentMethod === 'Account' && order.customer_id) {
+          try {
+            const currentUser = authManager.getCurrentUser()
+            if (currentUser?.id) {
+              const customerLedgerModule = await import('../../lib/customerLedgerManager')
+              const customerLedgerManager = customerLedgerModule.default
+              customerLedgerManager.setUserId(currentUser.id)
+
+              const { data: existing } = await supabase
+                .from('customer_ledger')
+                .select('*')
+                .eq('order_id', order.id)
+                .eq('user_id', currentUser.id)
+                .eq('transaction_type', 'debit')
+                .maybeSingle()
+
+              if (existing) {
+                if (existing.amount !== paymentData.newTotal) {
+                  await supabase.from('customer_ledger').delete().eq('id', existing.id)
+                  const currentBalance = await customerLedgerManager.getCustomerBalance(order.customer_id)
+                  await supabase.from('customer_ledger').insert({
+                    user_id: currentUser.id, customer_id: order.customer_id,
+                    transaction_type: 'debit', amount: paymentData.newTotal,
+                    balance_before: currentBalance, balance_after: currentBalance + paymentData.newTotal,
+                    order_id: order.id,
+                    description: `Order #${order.order_number} - ${(order.order_type || 'WALKIN').toUpperCase()}`,
+                    notes: 'Payment completed via inline payment modal', created_by: currentUser.id
+                  })
+                }
+              } else {
+                const currentBalance = await customerLedgerManager.getCustomerBalance(order.customer_id)
+                await supabase.from('customer_ledger').insert({
+                  user_id: currentUser.id, customer_id: order.customer_id,
+                  transaction_type: 'debit', amount: paymentData.newTotal,
+                  balance_before: currentBalance, balance_after: currentBalance + paymentData.newTotal,
+                  order_id: order.id,
+                  description: `Order #${order.order_number} - ${(order.order_type || 'WALKIN').toUpperCase()}`,
+                  notes: 'Payment completed via inline payment modal', created_by: currentUser.id
+                })
+              }
+            }
+          } catch (ledgerError) {
+            console.error('Failed to handle customer ledger:', ledgerError)
+            // Don't fail payment if ledger update fails
+          }
+        }
+      } else {
+        const orderIndex = cacheManager.cache.orders.findIndex(o => o.id === order.id)
+        if (orderIndex !== -1) {
+          cacheManager.cache.orders[orderIndex] = {
+            ...cacheManager.cache.orders[orderIndex],
+            payment_method: paymentData.paymentMethod,
+            payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
+            discount_amount: paymentData.discountAmount || 0,
+            total_amount: paymentData.newTotal,
+            updated_at: new Date().toISOString(),
+            _isSynced: false
+          }
+          await cacheManager.saveCacheToStorage()
+        }
+      }
+
+      if (paymentData.completeOrder === false) {
+        setSelectedOrder(prev => prev?.id === order.id
+          ? { ...prev, payment_status: 'Paid', payment_method: paymentData.paymentMethod, amount_paid: paymentData.newTotal, total_amount: paymentData.newTotal }
+          : prev)
+        toast.success('Payment recorded successfully')
+        setOrdersRefreshTrigger(prev => prev + 1)
+        return
+      }
+
+      toast.success(`Order #${order.order_number} paid and completed!`)
+      await handleOrderStatusUpdate(order, 'Completed')
+    } catch (error) {
+      toast.error(`Payment failed: ${error?.message}`)
+    }
+  }
+
+  const handleCompleteAlreadyPaidOrder = async (order) => {
+    try {
+      if (!order) { setOrdersRefreshTrigger(prev => prev + 1); return }
+      toast.success(`Order #${order.order_number} completed!`)
+      await handleOrderStatusUpdate(order, 'Completed')
+    } catch (error) {
+      toast.error(`Failed to complete order: ${error?.message}`)
+    }
+  }
 
   return (
     <div className={`h-screen flex ${classes.background} overflow-hidden transition-all duration-500`}>
@@ -492,23 +841,11 @@ export default function NewOrderPage() {
             setSelectedOrder(null)
             setCurrentView('products')
           }}
-          onPrint={() => notify.info('Use the Orders page to print')}
-          onPrintToken={() => notify.info('Use the Orders page to print token')}
-          onMarkReady={() => {
-            setOrdersRefreshTrigger(prev => prev + 1)
-            setSelectedOrder(null)
-            setCurrentView('products')
-          }}
-          onComplete={() => {
-            setOrdersRefreshTrigger(prev => prev + 1)
-            setSelectedOrder(null)
-            setCurrentView('products')
-          }}
-          onPaymentRequired={(order, paymentData) => {
-            setOrdersRefreshTrigger(prev => prev + 1)
-            setSelectedOrder(null)
-            setCurrentView('products')
-          }}
+          onPrint={() => handlePrintOrder(selectedOrder)}
+          onPrintToken={() => handlePrintToken(selectedOrder)}
+          onMarkReady={(order) => handleOrderStatusUpdate(order, 'Ready')}
+          onComplete={handleCompleteAlreadyPaidOrder}
+          onPaymentRequired={handlePaymentRequired}
           onConvertToDelivery={() => {
             setOrdersRefreshTrigger(prev => prev + 1)
             setSelectedOrder(null)
@@ -545,6 +882,24 @@ export default function NewOrderPage() {
       />
 
       </div>{/* end flex flex-1 overflow-hidden */}
+
+      {/* Split Payment Modal */}
+      {showSplitPaymentModal && splitPaymentOrder && (
+        <SplitPaymentModal
+          isOpen={showSplitPaymentModal}
+          onClose={() => { setShowSplitPaymentModal(false); setSplitPaymentOrder(null) }}
+          totalAmount={splitPaymentOrder.total_amount}
+          amountDue={splitPaymentOrder.total_amount}
+          customer={splitPaymentOrder.customers}
+          onPaymentComplete={async (paymentData) => {
+            setShowSplitPaymentModal(false)
+            setSplitPaymentOrder(null)
+            await handlePaymentRequired(splitPaymentOrder, paymentData)
+          }}
+          isDark={isDark}
+          classes={classes}
+        />
+      )}
 
       {/* Exit Confirmation Modal */}
       <Modal

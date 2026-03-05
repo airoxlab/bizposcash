@@ -864,6 +864,7 @@ export default function TakeawayPage() {
           .update({
             payment_method: paymentData.paymentMethod,
             payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
             discount_amount: paymentData.discountAmount || 0,
             discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
             total_amount: paymentData.newTotal,
@@ -884,6 +885,7 @@ export default function TakeawayPage() {
             ...cacheManager.cache.orders[orderIndex],
             payment_method: paymentData.paymentMethod,
             payment_status: 'Paid',
+            amount_paid: paymentData.newTotal,
             discount_amount: paymentData.discountAmount || 0,
             discount_percentage: paymentData.discountType === 'percentage' ? paymentData.discountValue : 0,
             total_amount: paymentData.newTotal,
@@ -1007,6 +1009,16 @@ export default function TakeawayPage() {
           console.error('❌ [Takeaway Payment] Failed to handle customer ledger:', ledgerError)
           // Don't fail the payment if ledger update fails
         }
+      }
+
+      // Payment-only: update selectedOrder in state and return — no modal, stays in order details
+      if (paymentData.completeOrder === false) {
+        setSelectedOrder(prev => prev?.id === order.id
+          ? { ...prev, payment_status: 'Paid', payment_method: paymentData.paymentMethod, amount_paid: paymentData.newTotal, total_amount: paymentData.newTotal }
+          : prev)
+        notify.success('Payment recorded successfully')
+        setOrdersRefreshTrigger(prev => prev + 1)
+        return
       }
 
       // Fetch loyalty redemption for this order
@@ -1169,6 +1181,7 @@ export default function TakeawayPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         total: paymentData.newTotal,
         subtotal: order.subtotal || paymentData.newTotal,
         paymentMethod: paymentData.paymentMethod,
@@ -1197,10 +1210,12 @@ export default function TakeawayPage() {
       // Play beep sound
       playBeepSound()
 
-      // Mark order as completed (this happens in background, modal stays visible)
-      handleOrderStatusUpdate(order, 'Completed').catch(err => {
-        console.error('Error updating order status:', err)
-      })
+      // Mark order as completed only if user chose "Paid + Complete"
+      if (paymentData.completeOrder !== false) {
+        handleOrderStatusUpdate(order, 'Completed').catch(err => {
+          console.error('Error updating order status:', err)
+        })
+      }
 
       // Refresh orders list
       setOrdersRefreshTrigger(prev => prev + 1)
@@ -1367,6 +1382,7 @@ export default function TakeawayPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         total: order.total_amount || order.subtotal || 0,
         subtotal: order.subtotal || order.total_amount || 0,
         paymentMethod: order.payment_method || 'Cash',
@@ -1606,6 +1622,7 @@ export default function TakeawayPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         orderType: order.order_type || 'takeaway',
         customer: order.customers || { full_name: order.customer_name, phone: order.customer_phone },
         deliveryAddress: order.customers?.addressline || order.delivery_address,
@@ -1779,6 +1796,7 @@ export default function TakeawayPage() {
 
       const orderData = {
         orderNumber: order.order_number,
+        dailySerial: order.daily_serial || null,
         orderType: order.order_type || 'takeaway',
         customerName: order.customers?.full_name || order.customer_name || '',
         customerPhone: order.customers?.phone || order.customer_phone || '',
@@ -1868,6 +1886,12 @@ export default function TakeawayPage() {
     localStorage.removeItem('takeaway_modifying_order')
     localStorage.removeItem('takeaway_modifying_order_number')
     localStorage.removeItem('takeaway_original_state')
+    localStorage.removeItem('takeaway_discount')
+    localStorage.removeItem('takeaway_original_order_status')
+    localStorage.removeItem('takeaway_original_payment_status')
+    localStorage.removeItem('takeaway_original_amount_paid')
+    localStorage.removeItem('takeaway_original_payment_method')
+    localStorage.removeItem('takeaway_can_decrease_qty')
   }
 
   const handleConfirmExit = () => {
@@ -2108,8 +2132,8 @@ export default function TakeawayPage() {
           order={selectedOrder}
           classes={classes}
           isDark={isDark}
-          onPrint={handlePrintOrder}
-          onPrintToken={handlePrintToken}
+          onPrint={null}
+          onPrintToken={null}
           onMarkReady={(order) => handleOrderStatusUpdate(order, 'Ready')}
           onComplete={handleCompleteAlreadyPaidOrder}
           onPaymentRequired={handlePaymentRequired}

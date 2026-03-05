@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { User, X, ChevronDown, ChevronUp, Clock, MapPin, Truck, DollarSign, FileText, Search, Plus, Check } from 'lucide-react'
 import { cacheManager } from '../../lib/cacheManager'
+import { supabase } from '../../lib/supabase'
+import { notify } from '../ui/NotificationSystem'
 
 export default function InlineCustomerPanel({
   orderType = 'walkin',
@@ -113,11 +115,80 @@ export default function InlineCustomerPanel({
       if (orderType === 'delivery' && !orderData.addressLabel) {
         update('addressLabel', 'Home')
       }
+
+      // In online mode: fetch latest customer data from Supabase so address is always fresh
+      // In offline mode: fall back to cached customer.addressline
+      if (orderType === 'delivery' && customer?.id && !orderData.addressLine) {
+        const isOnline = cacheManager.getNetworkStatus?.()?.isOnline ?? navigator.onLine
+        if (isOnline) {
+          supabase
+            .from('customers')
+            .select('addressline')
+            .eq('id', customer.id)
+            .maybeSingle()
+            .then(({ data }) => {
+              const freshAddress = data?.addressline
+              if (freshAddress) {
+                onCustomerChange({ ...customer, addressline: freshAddress })
+                onOrderDataChange({ ...orderData, addressLine: freshAddress })
+              } else if (customer?.addressline) {
+                onOrderDataChange({ ...orderData, addressLine: customer.addressline })
+              }
+            })
+        } else if (customer?.addressline) {
+          update('addressLine', customer.addressline)
+        }
+      }
     }
   }, [mode, orderType])
 
   const update = (field, value) => {
     onOrderDataChange({ ...orderData, [field]: value })
+  }
+
+  const handleSaveAndClose = async () => {
+    setMode('idle')
+
+    const addressLine = orderData.addressLine?.trim()
+    if (!customer?.id || !addressLine || addressLine.length < 3) return
+
+    try {
+      // 1. Update customers.addressline
+      await supabase
+        .from('customers')
+        .update({ addressline: addressLine, updated_at: new Date().toISOString() })
+        .eq('id', customer.id)
+
+      // 2. Save to customer_addresses if not already there
+      const { data: existing } = await supabase
+        .from('customer_addresses')
+        .select('id')
+        .eq('customer_id', customer.id)
+        .eq('address_line', addressLine)
+        .maybeSingle()
+
+      if (!existing) {
+        const label = orderData.addressLabel || 'Home'
+        await supabase
+          .from('customer_addresses')
+          .insert({
+            customer_id: customer.id,
+            address_line: addressLine,
+            label,
+            is_default: false
+          })
+      }
+
+      // 3. Update local cache Map so address is correct without full reload
+      cacheManager.updateCustomerInCache?.(customer.id, { addressline: addressLine })
+
+      // 4. Update the customer prop in parent state so delivery_customer localStorage is updated too
+      onCustomerChange({ ...customer, addressline: addressLine })
+
+      notify.success('Address saved', { duration: 2000 })
+    } catch (err) {
+      console.error('❌ [InlinePanel] Failed to save address:', err)
+    }
   }
 
   const addMins = (timeStr, mins) => {
@@ -130,9 +201,28 @@ export default function InlineCustomerPanel({
     onCustomerChange(c)
     setSearchQuery('')
     setSuggestions([])
-    // contentOnly: stay collapsed after selection (user opens manually)
-    // full mode: auto-expand
     setMode(contentOnly ? 'idle' : 'expanded')
+
+    if (orderType === 'delivery' && c?.id && !orderData.addressLine) {
+      const isOnline = cacheManager.getNetworkStatus?.()?.isOnline ?? navigator.onLine
+      if (isOnline) {
+        // Fetch latest address from Supabase — cache may be stale
+        supabase
+          .from('customers')
+          .select('addressline')
+          .eq('id', c.id)
+          .maybeSingle()
+          .then(({ data }) => {
+            const freshAddress = data?.addressline || c.addressline
+            if (freshAddress) {
+              onCustomerChange({ ...c, addressline: freshAddress })
+              onOrderDataChange({ ...orderData, addressLine: freshAddress })
+            }
+          })
+      } else if (c?.addressline) {
+        onOrderDataChange({ ...orderData, addressLine: c.addressline })
+      }
+    }
   }
 
   const clearCustomer = (e) => {
@@ -372,7 +462,7 @@ export default function InlineCustomerPanel({
         <div className="mt-1.5 space-y-2">
           {expandedFieldsUI}
           <button
-            onClick={() => setMode('idle')}
+            onClick={handleSaveAndClose}
             className="w-full py-1.5 text-xs font-bold rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors flex items-center justify-center gap-1"
           >
             <Check className="w-3 h-3" />

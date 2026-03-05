@@ -974,6 +974,7 @@ function WebOrdersPage() {
       const completeOrderData = {
         ...orderData,
         orderNumber: orderData.order_number,
+        dailySerial: orderData.daily_serial || null,
         cart: transformedCart, // Receipt printer expects 'cart' not 'items'
         items: transformedCart, // Keep items for kitchen token (USB printer)
         customer: orderData.customers,
